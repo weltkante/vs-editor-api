@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+     <RootDirectory>$(MSBuildThisFileDirectory)</RootDirectory>
+     <OutDir>$(RootDirectory)\bin\$(AssemblyName)\</OutDir>
+     <BaseIntermediateOutputPath>$(RootDirectory)\obj\$(AssemblyName)\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>
