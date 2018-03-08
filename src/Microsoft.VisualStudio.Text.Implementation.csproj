@@ -5,9 +5,9 @@
     <SignAssembly>true</SignAssembly>
     <AssemblyOriginatorKeyFile>key.snk</AssemblyOriginatorKeyFile>
     <DelaySign>false</DelaySign>
-    <Version>15.1.0-pre</Version>
+    <Version>15.1.1</Version>
     <AssemblyVersion>15.0.0.0</AssemblyVersion>
-    <NuGetVersionEditor>15.6.241-preview</NuGetVersionEditor>
+    <NuGetVersionEditor>15.6.27415</NuGetVersionEditor>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -98,6 +98,10 @@
     <EmbeddedResource Remove="Text\Def\Text*\**\*" />
     <None Remove="Core\Def\**\*" />
     <None Remove="Text\Def\Text*\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="System.ComponentModel.Composition" />
   </ItemGroup>
 
   <ItemGroup>
