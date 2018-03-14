@@ -12,11 +12,11 @@ namespace Microsoft.VisualStudio.Text.BraceCompletion.Implementation
     using Microsoft.VisualStudio.Utilities;
     using System.ComponentModel.Composition;
 
-    [Export(typeof(IWpfTextViewCreationListener))]
+    [Export(typeof(ITextViewCreationListener))]
     [ContentType("text")]
     [TextViewRole(PredefinedTextViewRoles.Editable)]
     [PartCreationPolicy(CreationPolicy.Shared)]
-    internal sealed class BraceCompletionManagerFactory : IWpfTextViewCreationListener
+    internal sealed class BraceCompletionManagerFactory : ITextViewCreationListener
     {
         #region Imports
 
@@ -33,7 +33,7 @@ namespace Microsoft.VisualStudio.Text.BraceCompletion.Implementation
 
         #region IWpfTextViewCreationListener
 
-        public void TextViewCreated(IWpfTextView textView)
+        public void TextViewCreated(ITextView textView)
         {
             textView.Properties.AddProperty("BraceCompletionManager",
                 new BraceCompletionManager(textView,
