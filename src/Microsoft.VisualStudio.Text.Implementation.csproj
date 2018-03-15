@@ -105,10 +105,13 @@
   <ItemGroup>
     <Compile Remove="Core\Def\**\*" />
     <Compile Remove="Text\Def\Text*\**\*" />
+    <Compile Remove="Text\Impl\BraceCompletion\**" />
     <EmbeddedResource Remove="Core\Def\**\*" />
     <EmbeddedResource Remove="Text\Def\Text*\**\*" />
+    <EmbeddedResource Remove="Text\Impl\BraceCompletion\**" />
     <None Remove="Core\Def\**\*" />
     <None Remove="Text\Def\Text*\**\*" />
+    <None Remove="Text\Impl\BraceCompletion\**" />
   </ItemGroup>
 
   <ItemGroup>
