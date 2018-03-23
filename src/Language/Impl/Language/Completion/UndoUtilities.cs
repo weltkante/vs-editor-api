@@ -9,7 +9,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
     /// <summary>
     /// Code taken from http://source.roslyn.io/#Microsoft.CodeAnalysis.EditorFeatures/Implementation/IntelliSense/Completion/Controller_Commit.cs
     /// </summary>
-    static class UndoUtilities
+    internal static class UndoUtilities
     {
         internal static void RollbackToBeforeTypeChar(ITextSnapshot initialTextSnapshot, ITextBuffer subjectBuffer)
         {

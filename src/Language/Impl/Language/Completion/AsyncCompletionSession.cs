@@ -19,13 +19,14 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
     /// Holds a state of the session
     /// and a reference to the UI element
     /// </summary>
-    internal class AsyncCompletionSession : IAsyncCompletionSession, ICompletionComputationCallbackHandler<CompletionModel>
+    internal class AsyncCompletionSession : IAsyncCompletionSession, ICompletionComputationCallbackHandler<CompletionModel>, IPropertyOwner
     {
         // Available data and services
-        private readonly IDictionary<IAsyncCompletionItemSource, SnapshotPoint> _completionSources;
+        private readonly IList<(IAsyncCompletionItemSource Source, SnapshotPoint Point)> _completionSources;
+        private readonly IDictionary<IAsyncCompletionItemSource, SnapshotPoint> _completionSourcesWhoGaveItems;
         private readonly IAsyncCompletionService _completionService;
         private readonly SnapshotSpan _initialApplicableSpan;
-        private readonly JoinableTaskFactory _jtf;
+        private readonly JoinableTaskContext JoinableTaskContext;
         private readonly ICompletionPresenterProvider _presenterProvider;
         private readonly AsyncCompletionBroker _broker;
         private readonly ITextView _textView;
@@ -72,28 +73,37 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
 
         public bool IsDismissed => _isDismissed;
 
-        public AsyncCompletionSession(SnapshotSpan applicableSpan, ImmutableArray<char> potentialCommitChars, JoinableTaskFactory jtf,
-            ICompletionPresenterProvider presenterProvider, IDictionary<IAsyncCompletionItemSource, SnapshotPoint> completionSources,
-            IAsyncCompletionService completionService, AsyncCompletionBroker broker, ITextView view, CompletionTelemetryHost telemetryHost, IGuardedOperations guardedOperations)
+        public PropertyCollection Properties { get; }
+
+        public AsyncCompletionSession(SnapshotSpan initialApplicableSpan, ImmutableArray<char> potentialCommitChars,
+            JoinableTaskContext joinableTaskContext, ICompletionPresenterProvider presenterProvider,
+            IList<(IAsyncCompletionItemSource, SnapshotPoint)> completionSources,IAsyncCompletionService completionService,
+            AsyncCompletionBroker broker, ITextView textView, CompletionTelemetryHost telemetryHost,
+            IGuardedOperations guardedOperations)
         {
-            _initialApplicableSpan = applicableSpan;
+            _initialApplicableSpan = initialApplicableSpan;
             _potentialCommitChars = potentialCommitChars;
-            _jtf = jtf;
+            JoinableTaskContext = joinableTaskContext;
             _presenterProvider = presenterProvider;
             _broker = broker;
-            _completionSources = completionSources;
+            _completionSources = completionSources; // still prorotype at the momemnt.
+            _completionSourcesWhoGaveItems = new Dictionary<IAsyncCompletionItemSource, SnapshotPoint>(); // To be filled in GetInitialModel
             _completionService = completionService;
-            _textView = view;
+            _textView = textView;
             _guardedOperations = guardedOperations;
             _telemetry = new CompletionSessionTelemetry(telemetryHost, completionService, presenterProvider);
             PageStepSize = presenterProvider?.ResultsPerPage ?? 1;
             _textView.Caret.PositionChanged += OnCaretPositionChanged;
+            Properties = new PropertyCollection();
         }
 
         bool IAsyncCompletionSession.CommitIfUnique(CancellationToken token)
         {
             if (_isDismissed)
                 return false;
+
+            if (!JoinableTaskContext.IsOnMainThread)
+                throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
             // Note that this will deadlock if OpenOrUpdate wasn't called ahead of time.
             var lastModel = _computation.WaitAndGetResult();
@@ -121,10 +131,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         /// <param name="token">Command handler infrastructure provides a token that we should pass to the language service's custom commit method.</param>
         /// <param name="typedChar">It is default(char) when commit was requested by an explcit command (e.g. hitting Tab, Enter or clicking)
         /// and it is not default(char) when commit happens as a result of typing a commit character.</param>
-        CommitBehavior IAsyncCompletionSession.Commit(CancellationToken token, char typedChar)
+        CommitBehavior IAsyncCompletionSession.Commit(char typedChar, CancellationToken token)
         {
             if (_isDismissed)
                 return CommitBehavior.None;
+
+            if (!JoinableTaskContext.IsOnMainThread)
+                throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
             var lastModel = _computation.WaitAndGetResult();
 
@@ -165,13 +178,15 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
 
             var lastModel = _computation.WaitAndGetResult();
 
-            if (!_jtf.Context.IsOnMainThread)
-                throw new InvalidOperationException($"{nameof(IAsyncCompletionSession)}.{nameof(IAsyncCompletionSession.Commit)} must be callled from UI thread.");
-
             UiStopwatch.Restart();
 
             // Pass appropriate buffer to the item's provider
-            var buffer = _completionSources[itemToCommit.Source].Snapshot.TextBuffer;
+            ITextBuffer buffer;
+            if (_completionSourcesWhoGaveItems.TryGetValue(itemToCommit.Source, out var point))
+                buffer = point.Snapshot.TextBuffer;
+            else
+                buffer = TextView.TextBuffer; // It's a suggestion mode item, it doesn't matter what the buffer is
+
             if (itemToCommit.UseCustomCommit)
             {
                 result = _guardedOperations.CallExtensionPoint(
@@ -224,7 +239,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                     errorSource: _gui,
                     asyncAction: async () =>
                     {
-                        await _jtf.SwitchToMainThreadAsync();
+                        await JoinableTaskContext.Factory.SwitchToMainThreadAsync();
                         copyOfGui.FiltersChanged -= OnFiltersChanged;
                         copyOfGui.CommitRequested -= OnCommitRequested;
                         copyOfGui.CompletionItemSelected -= OnItemSelected;
@@ -235,10 +250,12 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             }
         }
 
-        void IAsyncCompletionSession.OpenOrUpdate(CompletionTrigger trigger, SnapshotPoint triggerLocation)
+        void IAsyncCompletionSession.OpenOrUpdate(CompletionTrigger trigger, SnapshotPoint triggerLocation, CancellationToken commandToken)
         {
             if (_isDismissed)
                 return;
+
+            commandToken.Register(_computationCancellation.Cancel);
 
             if (_computation == null)
             {
@@ -258,7 +275,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             if (_computation == null)
             {
                 // Do not recompute, since this may change the selection.
-                ((IAsyncCompletionSession)this).OpenOrUpdate(trigger, triggerLocation);
+                ((IAsyncCompletionSession)this).OpenOrUpdate(trigger, triggerLocation, token);
             }
 
             if (((IAsyncCompletionSession)this).CommitIfUnique(token))
@@ -341,16 +358,17 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         /// Else, we create a mapping point from the top-buffer trigger location to each source's buffer
         /// and return whether any source would like to commit completion.
         /// </summary>
-        /// <remarks>This method must run on UI thread because of mapping the point across buffers.</remarks>
-        bool IAsyncCompletionSession.ShouldCommit(char typeChar, SnapshotPoint triggerLocation)
+        /// <remarks>This method must run on UI thread because of mapping the point across buffers.
+        /// The cancellation token is not used in this case, but provided for future needs.</remarks>
+        bool IAsyncCompletionSession.ShouldCommit(char typeChar, SnapshotPoint triggerLocation, CancellationToken token)
         {
-            if (!_jtf.Context.IsOnMainThread)
+            if (!JoinableTaskContext.IsOnMainThread)
                 throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
             if (_potentialCommitChars.Contains(typeChar))
             {
                 var mappingPoint = _textView.BufferGraph.CreateMappingPoint(triggerLocation, PointTrackingMode.Negative);
-                return _completionSources
+                return _completionSourcesWhoGaveItems
                     .Select(p => (p, mappingPoint.GetPoint(p.Value.Snapshot.TextBuffer, PositionAffinity.Predecessor)))
                     .Where(n => n.Item2.HasValue)
                     .Any(n => _guardedOperations.CallExtensionPoint(
@@ -389,7 +407,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         async Task ICompletionComputationCallbackHandler<CompletionModel>.UpdateUi(CompletionModel model)
         {
             if (_presenterProvider == null) return;
-            await _jtf.SwitchToMainThreadAsync();
+            await JoinableTaskContext.Factory.SwitchToMainThreadAsync();
             UpdateUiInner(model);
             await TaskScheduler.Default;
         }
@@ -403,6 +421,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             if (_isDismissed)
                 return;
             // TODO: Consider building CompletionPresentationViewModel in BG and passing it here
+
+            if (!JoinableTaskContext.IsOnMainThread)
+                throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
             UiStopwatch.Restart();
             if (_gui == null)
@@ -441,13 +462,27 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         private async Task<CompletionModel> GetInitialModel(ITextView view, CompletionTrigger trigger, SnapshotPoint triggerLocation, CancellationToken token)
         {
             // Map the trigger location to respective view for each completion provider
-            var nestedResults = await Task.WhenAll(
-                _completionSources.Select(
-                    p => _guardedOperations.CallExtensionPointAsync<CompletionContext>(
-                        errorSource: p.Key,
-                        asyncCall: () => p.Key.GetCompletionContextAsync(trigger, triggerLocation, _initialApplicableSpan, token),
+            var getCompletionTasks = new Task<CompletionContext>[_completionSources.Count];
+            for (int i = 0; i < _completionSources.Count; i++)
+            {
+                var index = i; // Capture current value of i
+                getCompletionTasks[i] = Task.Run(async () =>
+                {
+                    var source = _completionSources[index].Source;
+                    var point = _completionSources[index].Point;
+                    var context = await _guardedOperations.CallExtensionPointAsync(
+                        errorSource: _completionSources[index].Source,
+                        asyncCall: () => _completionSources[index].Source.GetCompletionContextAsync(trigger, point, _initialApplicableSpan, token),
                         valueOnThrow: null
-                    )));
+                    );
+                    if (context != null && !context.Items.IsDefaultOrEmpty)
+                    {
+                        _completionSourcesWhoGaveItems[source] = point;
+                    }
+                    return context;
+                });
+            }
+            var nestedResults = await Task.WhenAll(getCompletionTasks);
             var initialCompletionItems = nestedResults.Where(n => n != null && !n.Items.IsDefaultOrEmpty).SelectMany(n => n.Items).ToImmutableArray();
 
             // Do not continue with empty session
@@ -471,7 +506,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
 
 #if DEBUG
             Debug.WriteLine("Completion session got data.");
-            Debug.WriteLine("Sources: " + String.Join(", ", _completionSources.Select(n => n.Key.GetType())));
+            Debug.WriteLine("Sources: " + String.Join(", ", _completionSources.Select(n => n.Source.GetType())));
             Debug.WriteLine("Service: " + _completionService.GetType());
             Debug.WriteLine("Filters: " + String.Join(", ", availableFilters.Select(n => n.Filter.DisplayText)));
             Debug.WriteLine("Span: " + _initialApplicableSpan.GetText());
@@ -552,10 +587,10 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                     model.InitialItems,
                     model.InitialTriggerReason,
                     filterReason,
-                    triggerLocation.Snapshot,
+                    triggerLocation.Snapshot, // used exclusively to resolve applicable span
                     model.ApplicableSpan,
                     model.Filters,
-                    _textView,
+                    _textView, // Roslyn doesn't need it, and likely, can't use it
                     token),
                 valueOnThrow: null);
 
@@ -614,7 +649,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
 
             _guardedOperations.RaiseEvent(this, ItemsUpdated, new CompletionItemsWithHighlightEventArgs(returnedItems));
 
-            return model.WithSnapshotAndItems(triggerLocation.Snapshot, returnedItems, selectedIndex, filteredCompletion.UniqueItem, suggestionModeItem);
+            return model.WithSnapshotItemsAndFilters(triggerLocation.Snapshot, returnedItems, selectedIndex, filteredCompletion.UniqueItem, suggestionModeItem, filteredCompletion.Filters);
         }
 
         /// <summary>
@@ -739,7 +774,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             }
         }
 
-        public ImmutableArray<CompletionItem> GetVisibleItems(CancellationToken token)
+        public ImmutableArray<CompletionItem> GetItems(CancellationToken token)
         {
             // TODO: Consider returning array of CompletionItemWithHighlight so that we don't do linq here
             return _computation.RecentModel.PresentedItems.Select(n => n.CompletionItem).ToImmutableArray();

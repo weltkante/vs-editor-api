@@ -332,7 +332,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             );
         }
 
-        internal CompletionModel WithSnapshotAndItems(ITextSnapshot snapshot, ImmutableArray<CompletionItemWithHighlight> presentedItems, int selectedIndex, CompletionItem uniqueItem, CompletionItem suggestionModeItem)
+        internal CompletionModel WithSnapshotItemsAndFilters(ITextSnapshot snapshot, ImmutableArray<CompletionItemWithHighlight> presentedItems,
+            int selectedIndex, CompletionItem uniqueItem, CompletionItem suggestionModeItem, ImmutableArray<CompletionFilterWithState> filters)
         {
             return new CompletionModel(
                 initialItems: InitialItems,
@@ -340,7 +341,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 applicableSpan: ApplicableSpan,
                 initialTriggerReason: InitialTriggerReason,
                 snapshot: snapshot, // Updated
-                filters: Filters,
+                filters: filters, // Updated
                 presentedItems: presentedItems, // Updated
                 useSoftSelection: UseSoftSelection,
                 useSuggestionMode: DisplaySuggestionMode,
