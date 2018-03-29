@@ -21,11 +21,11 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// is indeed a commit character at a given location.
         /// Called on UI thread.
         /// </summary>
-        ImmutableArray<char> PotentialCommitCharacters { get; }
+        ImmutableArray<char> GetPotentialCommitCharacters();
 
         /// <summary>
         /// Returns whether this character is a commit character in a given location.
-        /// If every character returned by <see cref="PotentialCommitCharacters"/> should always commit the active completion session, return true.
+        /// If every character returned by <see cref="GetPotentialCommitCharacters"/> should always commit the active completion session, return true.
         /// Called on UI thread.
         /// </summary>
         /// <param name="typeChar">Character typed by the user</param>
@@ -40,10 +40,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// <param name="view">View that hosts completion and relevant buffers</param>
         /// <param name="buffer">Reference to the buffer with matching content type to perform text edits etc.</param>
         /// <param name="item">Which completion item is to be applied</param>
-        /// <param name="applicableSpan">Span augmented by completion, on the view's top buffer</param>
-        /// <param name="typedChar">Text change associated with this commit</param>
-        /// <param name="token">Cancellation token</param>
+        /// <param name="applicableSpan">Span augmented by completion</param>
+        /// <param name="edit">Text change associated with this commit</param>
         /// <returns>Instruction for the editor how to proceed after invoking this method</returns>
-        CommitResult TryCommit(ITextView view, ITextBuffer buffer, CompletionItem item, ITrackingSpan applicableSpan, char typedChar, CancellationToken token);
+        CommitResult TryCommit(ITextView view, ITextBuffer buffer, CompletionItem item, ITrackingSpan applicableSpan, char typeChar, CancellationToken token);
     }
 }

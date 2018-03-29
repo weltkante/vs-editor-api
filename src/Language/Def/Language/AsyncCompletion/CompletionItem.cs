@@ -47,7 +47,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// <summary>
         /// Image displayed in the UI
         /// </summary>
-        public AccessibleImageId Icon { get; }
+        public AccessibleImageId Image { get; }
 
         /// <summary>
         /// Additional text to display in the UI, after <see cref="DisplayText"/>.
@@ -68,14 +68,14 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
 
         /// <summary>
         /// Creates a completion item whose <see cref="DisplayText"/>, <see cref="InsertText"/>, <see cref="SortText"/> and <see cref="FilterText"/> are all the same,
-        /// and there are no icon, filter, suffix nor attribute icons associated with this item.
+        /// and there are no image, filter, suffix nor attribute images associated with this item.
         /// </summary>
         /// <param name="displayText">Text to use in the UI, when sorting, filtering and completing</param>
         /// <param name="source">Reference to <see cref="IAsyncCompletionSource"/> that created this item</param>
         public CompletionItem(string displayText, IAsyncCompletionSource source)
             : this(displayText, insertText: displayText, sortText: displayText, filterText: displayText,
-                  source: source, filters: ImmutableArray<CompletionFilter>.Empty, icon: default(AccessibleImageId),
-                  suffix: string.Empty, attributeIcons: ImmutableArray<AccessibleImageId>.Empty)
+                  source: source, filters: ImmutableArray<CompletionFilter>.Empty, image: default(AccessibleImageId),
+                  suffix: string.Empty, attributeImages: ImmutableArray<AccessibleImageId>.Empty)
         {
         }
 
@@ -85,12 +85,12 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// </summary>
         /// <param name="displayText">Text to use in the UI, when sorting, filtering and completing</param>
         /// <param name="source">Reference to <see cref="IAsyncCompletionSource"/> that created this item</param>
-        /// <param name="icon">Image displayed in the UI</param>
+        /// <param name="image">Image displayed in the UI</param>
         /// <param name="suffix">Additional text to display in the UI</param>
-        public CompletionItem(string displayText, IAsyncCompletionSource source, AccessibleImageId icon)
+        public CompletionItem(string displayText, IAsyncCompletionSource source, AccessibleImageId image)
             : this(displayText, insertText: displayText, sortText: displayText, filterText: displayText,
-                  source: source, filters: ImmutableArray<CompletionFilter>.Empty, icon: icon,
-                  suffix: string.Empty, attributeIcons: ImmutableArray<AccessibleImageId>.Empty)
+                  source: source, filters: ImmutableArray<CompletionFilter>.Empty, image: image,
+                  suffix: string.Empty, attributeImages: ImmutableArray<AccessibleImageId>.Empty)
         {
         }
 
@@ -100,12 +100,12 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// </summary>
         /// <param name="displayText">Text to use in the UI, when sorting, filtering and completing</param>
         /// <param name="source">Reference to <see cref="IAsyncCompletionSource"/> that created this item</param>
-        /// <param name="icon">Image displayed in the UI</param>
-        /// <param name="filters"><see cref="ImmutableArray"/> of references to <see cref="CompletionFilter"/>s applicable to this item</param>
-        public CompletionItem(string displayText, IAsyncCompletionSource source, AccessibleImageId icon, ImmutableArray<CompletionFilter> filters)
+        /// <param name="image">Image displayed in the UI</param>
+        /// <param name="suffix">Additional text to display in the UI</param>
+        public CompletionItem(string displayText, IAsyncCompletionSource source, AccessibleImageId image, ImmutableArray<CompletionFilter> filters)
             : this(displayText, insertText: displayText, sortText: displayText, filterText: displayText,
-                  source: source, filters: filters, icon: icon,
-                  suffix: string.Empty, attributeIcons: ImmutableArray<AccessibleImageId>.Empty)
+                  source: source, filters: filters, image: image,
+                  suffix: string.Empty, attributeImages: ImmutableArray<AccessibleImageId>.Empty)
         {
         }
 
@@ -115,13 +115,12 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// </summary>
         /// <param name="displayText">Text to use in the UI, when sorting, filtering and completing</param>
         /// <param name="source">Reference to <see cref="IAsyncCompletionSource"/> that created this item</param>
-        /// <param name="icon">Image displayed in the UI</param>
-        /// <param name="filters"><see cref="ImmutableArray"/> of references to <see cref="CompletionFilter"/>s applicable to this item</param>
+        /// <param name="image">Image displayed in the UI</param>
         /// <param name="suffix">Additional text to display in the UI</param>
-        public CompletionItem(string displayText, IAsyncCompletionSource source, AccessibleImageId icon, ImmutableArray<CompletionFilter> filters, string suffix)
+        public CompletionItem(string displayText, IAsyncCompletionSource source, AccessibleImageId image, ImmutableArray<CompletionFilter> filters, string suffix)
             : this(displayText, insertText: displayText, sortText: displayText, filterText: displayText,
-                  source: source, filters: ImmutableArray<CompletionFilter>.Empty, icon: icon,
-                  suffix: suffix, attributeIcons: ImmutableArray<AccessibleImageId>.Empty)
+                  source: source, filters: ImmutableArray<CompletionFilter>.Empty, image: image,
+                  suffix: suffix, attributeImages: ImmutableArray<AccessibleImageId>.Empty)
         {
         }
 
@@ -135,11 +134,11 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// <param name="source">Reference to <see cref="IAsyncCompletionSource"/> that created this item</param>
         /// <param name="filters"><see cref="ImmutableArray"/> of references to <see cref="CompletionFilter"/>s applicable to this item</param>
         /// <param name="useCustomCommit">Whether or not to invoke item's <see cref="Source"/>'s custom commit method when completing this item</param>
-        /// <param name="icon">Image displayed in the UI</param>
+        /// <param name="image">Image displayed in the UI</param>
         /// <param name="suffix">Additional text to display in the UI</param>
-        /// <param name="attributeIcons">Additional images to display in the UI</param>
-        public CompletionItem(string displayText, IAsyncCompletionSource source, AccessibleImageId icon, ImmutableArray<CompletionFilter> filters, string suffix,
-            string insertText, string sortText, string filterText, ImmutableArray<AccessibleImageId> attributeIcons)
+        /// <param name="attributeImages">Additional images to display in the UI</param>
+        public CompletionItem(string displayText, IAsyncCompletionSource source, AccessibleImageId image, ImmutableArray<CompletionFilter> filters, string suffix,
+            string insertText, string sortText, string filterText, ImmutableArray<AccessibleImageId> attributeImages)
         {
             if (displayText == null)
                 displayText = String.Empty;
@@ -157,10 +156,10 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
             SortText = sortText;
             FilterText = filterText;
             Source = source ?? throw new ArgumentNullException(nameof(source));
-            Icon = icon;
+            Image = image;
             Filters = filters;
             Suffix = suffix;
-            AttributeIcons = attributeIcons;
+            AttributeIcons = attributeImages;
             Properties = new PropertyCollection();
         }
 

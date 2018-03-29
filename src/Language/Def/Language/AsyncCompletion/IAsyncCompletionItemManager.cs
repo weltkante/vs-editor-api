@@ -26,8 +26,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// <param name="sortedList">Set of <see cref="CompletionItem"/>s to filter and sort, originally returned from <see cref="SortCompletionListAsync"/></param>
         /// <param name="triggerReason">The <see cref="CompletionTriggerReason"/> completion was initially triggered.</param>
         /// <param name="filterReason">The <see cref="CompletionFilterReason"/> completion is being updated.</param>
-        /// <param name="snapshot">Text snapshot of the view's top buffer</param>
-        /// <param name="applicableSpan">Span which tracks the location of the completion session and user's input</param>
+        /// <param name="snapshot">Current text snapshot of the view's top buffer</param>
+        /// <param name="applicableToSpan">Span which tracks the location of the completion session and user's input</param>
         /// <param name="selectedFilters">Filters, their availability and selection state</param>
         /// <param name="view">Instance of <see cref="ITextView"/> that hosts the completion</param>
         /// <param name="token">Cancellation token that may interrupt this operation</param>
@@ -37,7 +37,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
             CompletionTriggerReason triggerReason,
             CompletionFilterReason filterReason,
             ITextSnapshot snapshot,
-            ITrackingSpan applicableSpan,
+            ITrackingSpan applicableToSpan,
             ImmutableArray<CompletionFilterWithState> selectedFilters,
             ITextView view,
             CancellationToken token);
@@ -50,8 +50,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// </summary>
         /// <param name="initialList">Set of <see cref="CompletionItem"/>s to filter and sort</param>
         /// <param name="triggerReason">The <see cref="CompletionTriggerReason"/> completion was initially triggered.</param>
-        /// <param name="snapshot">Text snapshot of the view's top buffer</param>
-        /// <param name="applicableSpan">Span which tracks the location of the completion session and user's input</param>
+        /// <param name="snapshot">Current text snapshot of the view's top buffer</param>
+        /// <param name="applicableToSpan">Span which tracks the location of the completion session and user's input</param>
         /// <param name="view">Instance of <see cref="ITextView"/> that hosts the completion</param>
         /// <param name="token">Cancellation token that may interrupt this operation</param>
         /// <returns>Instance of <see cref="FilteredCompletionModel"/> that contains completion items to render, filters to display and recommended item to select</returns>
@@ -59,7 +59,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
             ImmutableArray<CompletionItem> initialList,
             CompletionTriggerReason triggerReason,
             ITextSnapshot snapshot,
-            ITrackingSpan applicableSpan,
+            ITrackingSpan applicableToSpan,
             ITextView view,
             CancellationToken token);
     }

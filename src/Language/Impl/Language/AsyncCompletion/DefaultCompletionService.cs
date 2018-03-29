@@ -14,28 +14,28 @@ using Microsoft.VisualStudio.Utilities;
 namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
     [Export(typeof(IAsyncCompletionItemManagerProvider))]
-    [Name(KnownCompletionNames.DefaultCompletionItemManager)]
+    [Name(KnownCompletionNames.DefaultCompletionService)]
     [ContentType("text")]
-    internal class DefaultCompletionItemManagerProvider : IAsyncCompletionItemManagerProvider
+    internal class DefaultCompletionServiceProvider : IAsyncCompletionItemManagerProvider
     {
         [Import]
         public IPatternMatcherFactory PatternMatcherFactory;
 
-        DefaultCompletionItemManager _instance;
+        DefaultCompletionService _instance;
 
         IAsyncCompletionItemManager IAsyncCompletionItemManagerProvider.GetOrCreate(ITextView textView)
         {
             if (_instance == null)
-                _instance = new DefaultCompletionItemManager(PatternMatcherFactory);
+                _instance = new DefaultCompletionService(PatternMatcherFactory);
             return _instance;
         }
     }
 
-    internal class DefaultCompletionItemManager : IAsyncCompletionItemManager
+    internal class DefaultCompletionService : IAsyncCompletionItemManager
     {
         readonly IPatternMatcherFactory _patternMatcherFactory;
 
-        internal DefaultCompletionItemManager(IPatternMatcherFactory patternMatcherFactory)
+        internal DefaultCompletionService(IPatternMatcherFactory patternMatcherFactory)
         {
             _patternMatcherFactory = patternMatcherFactory;
         }
@@ -102,7 +102,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         Task<ImmutableArray<CompletionItem>> IAsyncCompletionItemManager.SortCompletionListAsync(
             ImmutableArray<CompletionItem> initialList, CompletionTriggerReason triggerReason, ITextSnapshot snapshot,
-            ITrackingSpan applicableSpan, ITextView view, CancellationToken token)
+            ITrackingSpan applicableToSpan, ITextView view, CancellationToken token)
         {
             return Task.FromResult(initialList.OrderBy(n => n.SortText).ToImmutableArray());
         }
