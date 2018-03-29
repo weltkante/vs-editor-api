@@ -2,17 +2,15 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using Microsoft.VisualStudio.Language.Intellisense;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
-using Microsoft.VisualStudio.Text.Utilities;
 using Microsoft.VisualStudio.Utilities;
 
-namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
+namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
     internal class MetadataUtilities<T, TMetadata>
-        where T : class
-        where TMetadata : IContentTypeMetadata
+    where T : class
+    where TMetadata : IContentTypeMetadata
     {
         /// <summary>
         /// This method creates a collection of (T, SnapshotPoint) pairs where the SnapshotPoint is the originalPoint
@@ -24,7 +22,11 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         /// <param name="originalPoint"></param>
         /// <param name="imports"></param>
         /// <returns></returns>
-        internal static IEnumerable<(ITextBuffer buffer, SnapshotPoint point, Lazy<T, TMetadata> import)> GetOrderedBuffersAndImports(ITextView textView, SnapshotPoint location, Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<T, TMetadata>>> getImports, IComparer<IEnumerable<string>> contentTypeComparer)
+        internal static IEnumerable<(ITextBuffer buffer, SnapshotPoint point, Lazy<T, TMetadata> import)> GetOrderedBuffersAndImports(
+            ITextView textView,
+            SnapshotPoint location,
+            Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<T, TMetadata>>> getImports,
+            IComparer<IEnumerable<string>> contentTypeComparer)
         {
             // This method is created based on EditorCommandHandlerService.GetOrderedBuffersAndCommandHandlers
 
@@ -129,7 +131,10 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         /// <param name="getImports"></param>
         /// <param name="contentTypeComparer"></param>
         /// <returns></returns>
-        internal static IEnumerable<(ITextBuffer buffer, SnapshotPoint point, Lazy<T, TMetadata> import)> GetBuffersAndImports(ITextView textView, SnapshotPoint location, Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<T, TMetadata>>> getImports)
+        internal static IEnumerable<(ITextBuffer buffer, SnapshotPoint point, Lazy<T, TMetadata> import)> GetBuffersAndImports(
+            ITextView textView,
+            SnapshotPoint location,
+            Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<T, TMetadata>>> getImports)
         {
             var mappedPointsEnumeration = GetPointsOnAvailableBuffers(textView, location);
             if (!mappedPointsEnumeration.Any())
@@ -158,22 +163,6 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             var buffers = textView.BufferGraph.GetTextBuffers(b => mappingPoint.GetPoint(b, PositionAffinity.Predecessor) != null);
             var pointsInBuffers = buffers.Select(b => mappingPoint.GetPoint(b, PositionAffinity.Predecessor).Value);
             return pointsInBuffers;
-        }
-    }
-
-    internal static class CompletionUtilities
-    {
-        /// <summary>
-        /// Maps given point to buffers that contain this point. Requires UI thread.
-        /// </summary>
-        /// <param name="textView"></param>
-        /// <param name="point"></param>
-        /// <returns></returns>
-        internal static IEnumerable<ITextBuffer> GetBuffersForPoint(ITextView textView, SnapshotPoint point)
-        {
-            // We are looking at the buffer to the left of the caret.
-            return textView.BufferGraph.GetTextBuffers(n =>
-                textView.BufferGraph.MapDownToBuffer(point, PointTrackingMode.Negative, n, PositionAffinity.Predecessor) != null);
         }
     }
 }

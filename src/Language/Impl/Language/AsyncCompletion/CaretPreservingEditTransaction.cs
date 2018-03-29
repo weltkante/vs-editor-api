@@ -4,7 +4,7 @@ using System;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Text.Operations;
 
-namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
+namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
     internal class CaretPreservingEditTransaction : IDisposable
     {

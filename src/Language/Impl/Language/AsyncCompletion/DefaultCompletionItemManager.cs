@@ -11,36 +11,36 @@ using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Text.PatternMatching;
 using Microsoft.VisualStudio.Utilities;
 
-namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
+namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
-    [Export(typeof(IAsyncCompletionServiceProvider))]
-    [Name(KnownCompletionNames.DefaultCompletionService)]
+    [Export(typeof(IAsyncCompletionItemManagerProvider))]
+    [Name(KnownCompletionNames.DefaultCompletionItemManager)]
     [ContentType("text")]
-    internal class DefaultCompletionServiceProvider : IAsyncCompletionServiceProvider
+    internal class DefaultCompletionItemManagerProvider : IAsyncCompletionItemManagerProvider
     {
         [Import]
         public IPatternMatcherFactory PatternMatcherFactory;
 
-        DefaultCompletionService _instance;
+        DefaultCompletionItemManager _instance;
 
-        IAsyncCompletionService IAsyncCompletionServiceProvider.GetOrCreate(ITextView textView)
+        IAsyncCompletionItemManager IAsyncCompletionItemManagerProvider.GetOrCreate(ITextView textView)
         {
             if (_instance == null)
-                _instance = new DefaultCompletionService(PatternMatcherFactory);
+                _instance = new DefaultCompletionItemManager(PatternMatcherFactory);
             return _instance;
         }
     }
 
-    internal class DefaultCompletionService : IAsyncCompletionService
+    internal class DefaultCompletionItemManager : IAsyncCompletionItemManager
     {
         readonly IPatternMatcherFactory _patternMatcherFactory;
 
-        internal DefaultCompletionService(IPatternMatcherFactory patternMatcherFactory)
+        internal DefaultCompletionItemManager(IPatternMatcherFactory patternMatcherFactory)
         {
             _patternMatcherFactory = patternMatcherFactory;
         }
 
-        Task<FilteredCompletionModel> IAsyncCompletionService.UpdateCompletionListAsync(
+        Task<FilteredCompletionModel> IAsyncCompletionItemManager.UpdateCompletionListAsync(
             ImmutableArray<CompletionItem> sortedList, CompletionTriggerReason triggerReason, CompletionFilterReason filterReason,
             ITextSnapshot snapshot, ITrackingSpan applicableSpan, ImmutableArray<CompletionFilterWithState> filters, ITextView view, CancellationToken token)
         {
@@ -100,9 +100,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             return Task.FromResult(new FilteredCompletionModel(listWithHighlights, selectedItemIndex, updatedFilters));
         }
 
-        Task<ImmutableArray<CompletionItem>> IAsyncCompletionService.SortCompletionListAsync(
+        Task<ImmutableArray<CompletionItem>> IAsyncCompletionItemManager.SortCompletionListAsync(
             ImmutableArray<CompletionItem> initialList, CompletionTriggerReason triggerReason, ITextSnapshot snapshot,
-            ITrackingSpan applicableToSpan, ITextView view, CancellationToken token)
+            ITrackingSpan applicableSpan, ITextView view, CancellationToken token)
         {
             return Task.FromResult(initialList.OrderBy(n => n.SortText).ToImmutableArray());
         }

@@ -6,9 +6,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.Language.Intellisense;
 using Microsoft.VisualStudio.Text;
+using Microsoft.VisualStudio.Threading;
 using Microsoft.VisualStudio.Utilities;
 
-namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
+namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
     sealed class CompletionModel
     {
@@ -65,7 +66,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         /// <summary>
         /// Whether suggestion mode item should be selected.
         /// </summary>
-        public readonly bool SelectSuggestionMode;
+        public readonly bool SelectSuggestionItem;
 
         /// <summary>
         /// <see cref="CompletionItem"/> which contains user-entered text.
@@ -95,7 +96,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         /// </summary>
         public CompletionModel(ImmutableArray<CompletionItem> initialItems, ImmutableArray<CompletionItem> sortedItems,
             ITrackingSpan applicableSpan, CompletionTriggerReason initialTriggerReason, ITextSnapshot snapshot,
-            ImmutableArray<CompletionFilterWithState> filters, bool useSoftSelection, bool useSuggestionMode, string suggestionModeDescription, CompletionItem suggestionModeItem)
+            ImmutableArray<CompletionFilterWithState> filters, bool useSoftSelection, bool useSuggestionMode, bool selectSuggestionItem, string suggestionModeDescription, CompletionItem suggestionModeItem)
         {
             InitialItems = initialItems;
             SortedItems = sortedItems;
@@ -106,7 +107,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             SelectedIndex = 0;
             UseSoftSelection = useSoftSelection;
             DisplaySuggestionMode = useSuggestionMode;
-            SelectSuggestionMode = useSuggestionMode;
+            SelectSuggestionItem = selectSuggestionItem;
             SuggestionModeDescription = suggestionModeDescription;
             SuggestionModeItem = suggestionModeItem;
             UniqueItem = null;
@@ -118,7 +119,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         /// </summary>
         private CompletionModel(ImmutableArray<CompletionItem> initialItems, ImmutableArray<CompletionItem> sortedItems, ITrackingSpan applicableSpan, CompletionTriggerReason initialTriggerReason,
             ITextSnapshot snapshot, ImmutableArray<CompletionFilterWithState> filters, ImmutableArray<CompletionItemWithHighlight> presentedItems, bool useSoftSelection, bool useSuggestionMode,
-            string suggestionModeDescription, int selectedIndex, bool selectSuggestionMode, CompletionItem suggestionModeItem, CompletionItem uniqueItem, bool applicableSpanWasEmpty)
+            string suggestionModeDescription, int selectedIndex, bool selectSuggestionItem, CompletionItem suggestionModeItem, CompletionItem uniqueItem, bool applicableSpanWasEmpty)
         {
             InitialItems = initialItems;
             SortedItems = sortedItems;
@@ -130,9 +131,10 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             SelectedIndex = selectedIndex;
             UseSoftSelection = useSoftSelection;
             DisplaySuggestionMode = useSuggestionMode;
-            SelectSuggestionMode = selectSuggestionMode;
+            SelectSuggestionItem = selectSuggestionItem;
             SuggestionModeDescription = suggestionModeDescription;
             SuggestionModeItem = suggestionModeItem;
+            UniqueItem = uniqueItem;
             ApplicableSpanWasEmpty = applicableSpanWasEmpty;
         }
 
@@ -150,7 +152,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: DisplaySuggestionMode,
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: newSelectedIndex, // Updated
-                selectSuggestionMode: SelectSuggestionMode,
+                selectSuggestionItem: SelectSuggestionItem,
                 suggestionModeItem: SuggestionModeItem,
                 uniqueItem: UniqueItem,
                 applicableSpanWasEmpty: ApplicableSpanWasEmpty
@@ -171,7 +173,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: DisplaySuggestionMode,
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: SelectedIndex,
-                selectSuggestionMode: SelectSuggestionMode,
+                selectSuggestionItem: SelectSuggestionItem,
                 suggestionModeItem: SuggestionModeItem,
                 uniqueItem: UniqueItem,
                 applicableSpanWasEmpty: ApplicableSpanWasEmpty
@@ -192,7 +194,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: DisplaySuggestionMode,
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: SelectedIndex,
-                selectSuggestionMode: SelectSuggestionMode,
+                selectSuggestionItem: SelectSuggestionItem,
                 suggestionModeItem: SuggestionModeItem,
                 uniqueItem: UniqueItem,
                 applicableSpanWasEmpty: ApplicableSpanWasEmpty
@@ -213,7 +215,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: DisplaySuggestionMode,
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: newIndex, // Updated
-                selectSuggestionMode: false, // Explicit selection of regular item
+                selectSuggestionItem: false, // Explicit selection of regular item
                 suggestionModeItem: SuggestionModeItem,
                 uniqueItem: UniqueItem,
                 applicableSpanWasEmpty: ApplicableSpanWasEmpty
@@ -234,7 +236,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: DisplaySuggestionMode,
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: -1, // Deselect regular item
-                selectSuggestionMode: true, // Explicit selection of suggestion item
+                selectSuggestionItem: true, // Explicit selection of suggestion item
                 suggestionModeItem: SuggestionModeItem,
                 uniqueItem: UniqueItem,
                 applicableSpanWasEmpty: ApplicableSpanWasEmpty
@@ -255,7 +257,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: newUseSuggestionMode, // Updated
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: SelectedIndex,
-                selectSuggestionMode: SelectSuggestionMode,
+                selectSuggestionItem: SelectSuggestionItem,
                 suggestionModeItem: SuggestionModeItem,
                 uniqueItem: UniqueItem,
                 applicableSpanWasEmpty: ApplicableSpanWasEmpty
@@ -279,7 +281,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: DisplaySuggestionMode,
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: SelectedIndex,
-                selectSuggestionMode: SelectSuggestionMode,
+                selectSuggestionItem: SelectSuggestionItem,
                 suggestionModeItem: newSuggestionModeItem,
                 uniqueItem: UniqueItem,
                 applicableSpanWasEmpty: ApplicableSpanWasEmpty
@@ -304,7 +306,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: DisplaySuggestionMode,
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: SelectedIndex,
-                selectSuggestionMode: SelectSuggestionMode,
+                selectSuggestionItem: SelectSuggestionItem,
                 suggestionModeItem: SuggestionModeItem,
                 uniqueItem: newUniqueItem,
                 applicableSpanWasEmpty: ApplicableSpanWasEmpty
@@ -325,7 +327,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: DisplaySuggestionMode,
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: SelectedIndex,
-                selectSuggestionMode: SelectSuggestionMode,
+                selectSuggestionItem: SelectSuggestionItem,
                 suggestionModeItem: SuggestionModeItem,
                 uniqueItem: UniqueItem,
                 applicableSpanWasEmpty: ApplicableSpanWasEmpty
@@ -347,7 +349,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: DisplaySuggestionMode,
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: selectedIndex, // Updated
-                selectSuggestionMode: SelectSuggestionMode,
+                selectSuggestionItem: SelectSuggestionItem,
                 suggestionModeItem: suggestionModeItem, // Updated
                 uniqueItem: uniqueItem, // Updated
                 applicableSpanWasEmpty: ApplicableSpanWasEmpty
@@ -368,7 +370,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
                 useSuggestionMode: DisplaySuggestionMode,
                 suggestionModeDescription: SuggestionModeDescription,
                 selectedIndex: SelectedIndex,
-                selectSuggestionMode: SelectSuggestionMode,
+                selectSuggestionItem: SelectSuggestionItem,
                 suggestionModeItem: SuggestionModeItem,
                 uniqueItem: UniqueItem,
                 applicableSpanWasEmpty: applicableSpanIsEmpty // Updated
@@ -376,36 +378,40 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
     }
 
-    sealed class ModelComputation<TModel>
+    sealed class ModelComputation<TModel> where TModel : class
     {
-        private Task<TModel> _lastTask = Task.FromResult(default(TModel));
-        private Task _notifyUITask = Task.CompletedTask;
+        private readonly JoinableTaskFactory _joinableTaskFactory;
         private readonly TaskScheduler _computationTaskScheduler;
         private readonly CancellationToken _token;
         private readonly IGuardedOperations _guardedOperations;
-        private CancellationTokenSource _uiCancellation;
         private readonly ICompletionComputationCallbackHandler<TModel> _callbacks;
+
+        private bool _terminated;
+        private JoinableTask<TModel> _lastJoinableTask;
+        private CancellationTokenSource _uiCancellation;
+
         internal TModel RecentModel { get; private set; } = default(TModel);
 
-        public ModelComputation(TaskScheduler computationTaskScheduler, CancellationToken token, IGuardedOperations guardedOperations, ICompletionComputationCallbackHandler<TModel> callbacks)
+        public ModelComputation(
+            TaskScheduler computationTaskScheduler,
+            JoinableTaskContext joinableTaskContext,
+            Func<TModel, CancellationToken, Task<TModel>> initialTransformation,
+            CancellationToken token,
+            IGuardedOperations guardedOperations,
+            ICompletionComputationCallbackHandler<TModel> callbacks)
         {
+            _joinableTaskFactory = joinableTaskContext.Factory;
             _computationTaskScheduler = computationTaskScheduler;
             _token = token;
             _guardedOperations = guardedOperations;
-            _uiCancellation = new CancellationTokenSource();
             _callbacks = callbacks;
-        }
 
-        private Task<TModel> SafelyInvoke(Func<TModel, CancellationToken, Task<TModel>> transformation, Task<TModel> previousTask, CancellationToken token)
-        {
-            var transformedTask = transformation(previousTask.Result, token);
-            if (transformedTask.IsFaulted)
-            {
-                _guardedOperations.HandleException(this, transformedTask.Exception);
-                _callbacks.Dismiss();
-                return previousTask;
-            }
-            return transformedTask;
+            // Start dummy tasks so that we don't need to check for null on first Enqueue
+            _lastJoinableTask = _joinableTaskFactory.RunAsync(() => Task.FromResult(default(TModel)));
+            _uiCancellation = new CancellationTokenSource();
+
+            // Immediately run the first transformation, to operate on proper TModel.
+            Enqueue(initialTransformation, updateUi: false);
         }
 
         /// <summary>
@@ -415,48 +421,71 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         /// </summary>
         public void Enqueue(Func<TModel, CancellationToken, Task<TModel>> transformation, bool updateUi)
         {
-            // This method is based on Roslyn's ModelComputation.ChainTaskAndNotifyControllerWhenFinished
-            var nextTask = _lastTask.ContinueWith(t => SafelyInvoke(transformation, t, _token), _computationTaskScheduler).Unwrap();
-            _lastTask = nextTask;
+            // The integrity of our sequential chain depends on this method not being called concurrently.
+            // So we require the UI thread.
+            if (!_joinableTaskFactory.Context.IsOnMainThread)
+                throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
-            // If the _notifyUITask is canceled, refresh it
-            if (_notifyUITask.IsCanceled || _uiCancellation.IsCancellationRequested)
-            {
-                _notifyUITask = Task.CompletedTask;
+            if (_token.IsCancellationRequested || _terminated)
+                return; // Don't enqueue after computation has stopped.
+
+            // Attempt to commit (CommitIfUnique) will cancel the UI updates. If the commit failed, we still want to update the UI.
+            if (_uiCancellation.IsCancellationRequested)
                 _uiCancellation = new CancellationTokenSource();
-            }
 
-            _notifyUITask = Task.Factory.ContinueWhenAll(
-                new[] { _notifyUITask, nextTask },
-                async existingTasks =>
+            var previousTask = _lastJoinableTask;
+            JoinableTask<TModel> currentTask = null;
+            currentTask = _joinableTaskFactory.RunAsync(async () =>
+            {
+                await Task.Yield(); // Yield to guarantee that currentTask is assigned.
+                await _computationTaskScheduler; // Go to the above priority thread. Main thread will return as soon as possible.
+                try
                 {
-                    if (existingTasks.All(t => t.Status == TaskStatus.RanToCompletion))
-                    {
-                        OnModelUpdated(nextTask.Result);
-                        if (updateUi && nextTask == _lastTask)
-                        {
-                            await _callbacks.UpdateUi(nextTask.Result);
-                        }
-                    }
-                },
-                _uiCancellation.Token
-            );
-        }
+                    var previousModel = await previousTask;
+                    // Previous task finished processing. We are ready to execute next piece of work.
+                    if (_token.IsCancellationRequested || _terminated)
+                        return previousModel;
 
-        private void OnModelUpdated(TModel result)
-        {
-            RecentModel = result;
+                    var transformedModel = await transformation(await previousTask, _token);
+                    RecentModel = transformedModel;
+
+                    // TODO: update UI even if updateUi is false but it wasn't updated yet.
+                    if (_lastJoinableTask == currentTask && updateUi)
+                    {
+                        // update UI because we're the latest task
+                        if (!_uiCancellation.IsCancellationRequested)
+                            _callbacks.UpdateUi(transformedModel, _uiCancellation.Token).Forget();
+                    }
+
+                    return transformedModel;
+                }
+                catch (Exception ex)
+                {
+                    _terminated = true;
+                    _guardedOperations.HandleException(this, ex);
+                    _callbacks.Dismiss();
+                    return await previousTask;
+                }
+            });
+
+            _lastJoinableTask = currentTask;
         }
 
         /// <summary>
         /// Blocks, waiting for all background work to finish.
-        /// Ignores the last piece of work a.k.a. "updateUI"
+        /// Ignores the last piece of work a.k.a. "updateUi"
         /// </summary>
-        public TModel WaitAndGetResult()
+        public TModel WaitAndGetResult(CancellationToken token)
         {
             _uiCancellation.Cancel();
-            _lastTask.Wait();
-            return _lastTask.Result;
+            try
+            {
+                return _lastJoinableTask.Join(token);
+            }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
         }
     }
 }

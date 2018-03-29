@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.Text.Utilities;
 
-namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
+namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
     internal class CompletionSessionTelemetry
     {
@@ -31,11 +31,11 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         internal int FinalItemCount { get; private set; }
         internal int NumberOfKeystrokes { get; private set; }
 
-        public CompletionSessionTelemetry(CompletionTelemetryHost telemetryHost, IAsyncCompletionService completionService, ICompletionPresenterProvider presenterProvider)
+        public CompletionSessionTelemetry(CompletionTelemetryHost telemetryHost, IAsyncCompletionItemManager completionService, ICompletionPresenterProvider presenterProvider)
         {
             _telemetryHost = telemetryHost;
-            CompletionService = _telemetryHost.GetCompletionServiceName(completionService);
-            CompletionPresenterProvider = _telemetryHost.GetCompletionPresenterProviderName(presenterProvider);
+            CompletionService = CompletionTelemetryHost.GetItemManagerName(completionService);
+            CompletionPresenterProvider = CompletionTelemetryHost.GetPresenterProviderName(presenterProvider);
         }
 
         internal void RecordProcessing(long processingTime, int itemCount)
@@ -75,9 +75,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             NumberOfKeystrokes++;
         }
 
-        internal void RecordCommitted(long commitDuration, CompletionItem committedItem)
+        internal void RecordCommitted(long commitDuration, IAsyncCompletionCommitManager manager)
         {
-            CompletionSource = committedItem.UseCustomCommit ? _telemetryHost.GetItemSourceName(committedItem.Source) : String.Empty;
+            CompletionSource = CompletionTelemetryHost.GetCommitManagerName(manager);
             CommitDuration = commitDuration;
             _telemetryHost.Add(this);
         }
@@ -123,9 +123,10 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
             _broker = broker;
         }
 
-        internal string GetItemSourceName(IAsyncCompletionItemSource source) => _broker.GetItemSourceName(source);
-        internal string GetCompletionServiceName(IAsyncCompletionService service) => _broker.GetCompletionServiceName(service);
-        internal string GetCompletionPresenterProviderName(ICompletionPresenterProvider provider) => _broker.GetCompletionPresenterProviderName(provider);
+        internal static string GetSourceName(IAsyncCompletionSource source) => source?.GetType().ToString() ?? string.Empty;
+        internal static string GetCommitManagerName(IAsyncCompletionCommitManager manager) => manager?.GetType().ToString() ?? string.Empty;
+        internal static string GetItemManagerName(IAsyncCompletionItemManager service) => service?.GetType().ToString() ?? string.Empty;
+        internal static string GetPresenterProviderName(ICompletionPresenterProvider provider) => provider?.GetType().ToString() ?? string.Empty;
 
         /// <summary>
         /// Adds data from <see cref="CompletionSessionTelemetry" /> to appropriate buckets.

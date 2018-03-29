@@ -35,6 +35,18 @@ namespace Microsoft.VisualStudio.Text.Editor
         }
 
         /// <summary>
+        /// Determines whether the view is in the process of being laid out or is preparing to be laid out.
+        /// </summary>
+        /// <remarks>
+        /// As opposed to <see cref="ITextView.InLayout"/>, it is safe to get the <see cref="ITextView.TextViewLines"/>
+        /// but attempting to queue another layout will cause a reentrant layout exception.
+        /// </remarks>
+        bool InOuterLayout
+        {
+            get;
+        }
+
+        /// <summary>
         /// Raised whenever the view's MaxTextRightCoordinate is changed.
         /// </summary>
         /// <remarks>

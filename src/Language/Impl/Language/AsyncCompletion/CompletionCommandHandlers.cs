@@ -7,8 +7,9 @@ using Microsoft.VisualStudio.Text.Editor.Commanding.Commands;
 using Microsoft.VisualStudio.Text.Operations;
 using Microsoft.VisualStudio.Text.Utilities;
 using Microsoft.VisualStudio.Utilities;
+using CommonImplementation = Microsoft.VisualStudio.Language.Intellisense.Implementation;
 
-namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
+namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
     /// <summary>
     /// Reacts to the down arrow command and attempts to scroll the completion list.
@@ -48,7 +49,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         [Import]
         IEditorOperationsFactoryService EditorOperationsFactoryService;
 
-        string INamed.DisplayName => Strings.CompletionCommandHandlerName;
+        string INamed.DisplayName => CommonImplementation.Strings.CompletionCommandHandlerName;
 
         /// <summary>
         /// Helper method that returns command state for commands
@@ -56,12 +57,21 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         /// </summary>
         /// <param name="view"></param>
         /// <returns></returns>
-        private CommandState Available(IContentType contentType)
+        private CommandState GetAvailability(IContentType contentType)
         {
             return ModernCompletionFeature.GetFeatureState(ExperimentationService)
                 && Broker.IsCompletionSupported(contentType)
                 ? CommandState.Available
                 : CommandState.Unspecified;
+        }
+
+        private CommandState GetAvailabilityOfSuggestionMode(IContentType contentType, ITextView textView)
+        {
+            return new CommandState(
+                isAvailable: ModernCompletionFeature.GetFeatureState(ExperimentationService)
+                             && Broker.IsCompletionSupported(contentType),
+                isChecked: CompletionUtilities.GetSuggestionModeOption(textView));
+            // TODO: Once we get a special TextViewRole, detect if we are in debugger and ready the option for suggestion mode in debugger window
         }
 
         /// <summary>
@@ -71,7 +81,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         /// <remarks>
         /// Completion might be active only if the feature is available, so we're skipping other checks.
         /// </remarks>
-        private CommandState AvailableIfCompletionIsUp(ITextView textView)
+        private CommandState GetAvailabilityIfCompletionIsUp(ITextView textView)
         {
             return Broker.IsCompletionActive(textView)
                 ? CommandState.Available
@@ -79,7 +89,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState IChainedCommandHandler<BackspaceKeyCommandArgs>.GetCommandState(BackspaceKeyCommandArgs args, Func<CommandState> nextCommandHandler)
-           => AvailableIfCompletionIsUp(args.TextView);
+           => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         void IChainedCommandHandler<BackspaceKeyCommandArgs>.ExecuteCommand(BackspaceKeyCommandArgs args, Action nextCommandHandler, CommandExecutionContext executionContext)
         {
@@ -96,7 +106,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<EscapeKeyCommandArgs>.GetCommandState(EscapeKeyCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<EscapeKeyCommandArgs>.ExecuteCommand(EscapeKeyCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -110,7 +120,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<InvokeCompletionListCommandArgs>.GetCommandState(InvokeCompletionListCommandArgs args)
-            => Available(args.SubjectBuffer.ContentType);
+            => GetAvailability(args.SubjectBuffer.ContentType);
 
         bool ICommandHandler<InvokeCompletionListCommandArgs>.ExecuteCommand(InvokeCompletionListCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -134,7 +144,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<CommitUniqueCompletionListItemCommandArgs>.GetCommandState(CommitUniqueCompletionListItemCommandArgs args)
-            => Available(args.SubjectBuffer.ContentType);
+            => GetAvailability(args.SubjectBuffer.ContentType);
 
         bool ICommandHandler<CommitUniqueCompletionListItemCommandArgs>.ExecuteCommand(CommitUniqueCompletionListItemCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -159,30 +169,33 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<InsertSnippetCommandArgs>.GetCommandState(InsertSnippetCommandArgs args)
-            => Available(args.SubjectBuffer.ContentType);
+            => GetAvailability(args.SubjectBuffer.ContentType);
 
         bool ICommandHandler<InsertSnippetCommandArgs>.ExecuteCommand(InsertSnippetCommandArgs args, CommandExecutionContext executionContext)
         {
-            System.Diagnostics.Debug.WriteLine("!!!! InsertSnippetCommandArgs");
+            // Room for future implementation.
             return false;
         }
 
         CommandState ICommandHandler<ToggleCompletionModeCommandArgs>.GetCommandState(ToggleCompletionModeCommandArgs args)
-            => Available(args.SubjectBuffer.ContentType);
+            => GetAvailabilityOfSuggestionMode(args.SubjectBuffer.ContentType, args.TextView);
 
         bool ICommandHandler<ToggleCompletionModeCommandArgs>.ExecuteCommand(ToggleCompletionModeCommandArgs args, CommandExecutionContext executionContext)
         {
+            var toggledValue = !CompletionUtilities.GetSuggestionModeOption(args.TextView);
+            CompletionUtilities.SetSuggestionModeOption(args.TextView, toggledValue);
+
             var session = Broker.GetSession(args.TextView) as AsyncCompletionSession; // we are accessing an internal method
             if (session != null)
             {
-                session.ToggleSuggestionMode();
-                return true; // TODO: Investigate. If we return false, we get called again. No matter what we return, the button in the UI does not update. 
+                session.SetSuggestionMode(toggledValue);
+                return true;
             }
             return false;
         }
 
         CommandState IChainedCommandHandler<DeleteKeyCommandArgs>.GetCommandState(DeleteKeyCommandArgs args, Func<CommandState> nextCommandHandler)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         void IChainedCommandHandler<DeleteKeyCommandArgs>.ExecuteCommand(DeleteKeyCommandArgs args, Action nextCommandHandler, CommandExecutionContext executionContext)
         {
@@ -199,7 +212,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<WordDeleteToEndCommandArgs>.GetCommandState(WordDeleteToEndCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<WordDeleteToEndCommandArgs>.ExecuteCommand(WordDeleteToEndCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -213,7 +226,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<WordDeleteToStartCommandArgs>.GetCommandState(WordDeleteToStartCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<WordDeleteToStartCommandArgs>.ExecuteCommand(WordDeleteToStartCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -227,7 +240,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<RedoCommandArgs>.GetCommandState(RedoCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<RedoCommandArgs>.ExecuteCommand(RedoCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -241,7 +254,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<ReturnKeyCommandArgs>.GetCommandState(ReturnKeyCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<ReturnKeyCommandArgs>.ExecuteCommand(ReturnKeyCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -259,7 +272,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<TabKeyCommandArgs>.GetCommandState(TabKeyCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<TabKeyCommandArgs>.ExecuteCommand(TabKeyCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -277,7 +290,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState IChainedCommandHandler<TypeCharCommandArgs>.GetCommandState(TypeCharCommandArgs args, Func<CommandState> nextCommandHandler)
-            => Available(args.SubjectBuffer.ContentType);
+            => GetAvailability(args.SubjectBuffer.ContentType);
 
         void IChainedCommandHandler<TypeCharCommandArgs>.ExecuteCommand(TypeCharCommandArgs args, Action nextCommandHandler, CommandExecutionContext executionContext)
         {
@@ -358,7 +371,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<UndoCommandArgs>.GetCommandState(UndoCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<UndoCommandArgs>.ExecuteCommand(UndoCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -372,7 +385,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<DownKeyCommandArgs>.GetCommandState(DownKeyCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<DownKeyCommandArgs>.ExecuteCommand(DownKeyCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -386,7 +399,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<PageDownKeyCommandArgs>.GetCommandState(PageDownKeyCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<PageDownKeyCommandArgs>.ExecuteCommand(PageDownKeyCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -400,7 +413,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<PageUpKeyCommandArgs>.GetCommandState(PageUpKeyCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<PageUpKeyCommandArgs>.ExecuteCommand(PageUpKeyCommandArgs args, CommandExecutionContext executionContext)
         {
@@ -414,7 +427,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
         }
 
         CommandState ICommandHandler<UpKeyCommandArgs>.GetCommandState(UpKeyCommandArgs args)
-            => AvailableIfCompletionIsUp(args.TextView);
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
 
         bool ICommandHandler<UpKeyCommandArgs>.ExecuteCommand(UpKeyCommandArgs args, CommandExecutionContext executionContext)
         {

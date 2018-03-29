@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.Text;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Microsoft.VisualStudio.Language.Intellisense.Implementation
+namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
     /// <summary>
     /// Code taken from http://source.roslyn.io/#Microsoft.CodeAnalysis.EditorFeatures/Implementation/IntelliSense/Completion/Controller_Commit.cs
