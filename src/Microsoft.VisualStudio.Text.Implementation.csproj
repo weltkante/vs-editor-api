@@ -5,7 +5,7 @@
     <SignAssembly>true</SignAssembly>
     <AssemblyOriginatorKeyFile>key.snk</AssemblyOriginatorKeyFile>
     <DelaySign>false</DelaySign>
-    <Version>15.0.23-pre</Version>
+    <Version>15.0.24-pre</Version>
     <AssemblyVersion>15.0.0.0</AssemblyVersion>
     <NuGetVersionEditor>15.7.272-preview-g0de2faf761</NuGetVersionEditor>
     <NuGetVersionLanguage>15.7.272-preview-g0de2faf761</NuGetVersionLanguage>
@@ -125,6 +125,7 @@
 
   <ItemGroup>
     <Compile Remove="Core\Def\**\*" />
+    <Compile Remove="Language\Def\**\*" />
     <Compile Remove="Text\Def\Text*\**\*" />
     <EmbeddedResource Remove="Core\Def\**\*" />
     <EmbeddedResource Remove="Text\Def\Text*\**\*" />
