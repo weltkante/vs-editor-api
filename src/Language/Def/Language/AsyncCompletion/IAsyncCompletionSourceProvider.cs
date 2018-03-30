@@ -17,7 +17,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
     /// matches content type of any buffer in the completion's trigger location.
     /// </remarks>
     /// <example>
-    ///     [Export(typeof(IAsyncCompletionSource))]
+    ///     [Export(typeof(IAsyncCompletionSourceProvider))]
     ///     [Name(nameof(MyCompletionSource))]
     ///     [ContentType("text")]
     ///     [TextViewRoles(PredefinedTextViewRoles.Editable)]
@@ -27,6 +27,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
     {
         /// <summary>
         /// Creates an instance of <see cref="IAsyncCompletionSource"/> for the specified <see cref="ITextView"/>.
+        /// Called on the UI thread.
         /// </summary>
         /// <param name="textView">Text view that will host the completion. Completion acts on buffers of this view.</param>
         /// <returns>Instance of <see cref="IAsyncCompletionSource"/></returns>

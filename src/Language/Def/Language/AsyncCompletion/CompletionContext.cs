@@ -58,8 +58,6 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// <see cref="CompletionFilter"/> available for these items and instructions on suggestion mode and soft selection.
         /// </summary>
         /// <param name="items">Available completion items</param>
-        /// <param name="applicableToSpan">Completion list will be filtered by contents of this span</param>
-        /// <param name="availableFilters">Completion filters available for these completion items</param>
         /// <param name="useSoftSelection">Whether UI should use soft selection</param>
         /// <param name="useSuggestionMode">Whether UI should enter suggestion mode</param>
         /// <param name="suggestionModeDescription">Explains why suggestion mode is active. It is displayed when applicableSpan is empty. Otherwise, UI displays content of applicableSpan. May be null.</param>

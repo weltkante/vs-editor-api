@@ -57,9 +57,6 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// </summary>
         internal Stopwatch UiStopwatch { get; } = new Stopwatch();
 
-        // When set, UI will no longer be updated
-        private bool _isDismissed;
-
         // Facilitate experience when there are no items to display
         private bool _selectionModeBeforeNoResultFallback;
         private bool _inNoResultFallback;
@@ -71,7 +68,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         public ITextView TextView => _textView;
 
-        public bool IsDismissed => _isDismissed;
+        // When set, UI will no longer be updated
+        public bool IsDismissed { get; private set; }
 
         public PropertyCollection Properties { get; }
 
@@ -100,14 +98,18 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         bool IAsyncCompletionSession.CommitIfUnique(CancellationToken token)
         {
-            if (_isDismissed)
+            if (IsDismissed)
                 return false;
 
             if (!JoinableTaskContext.IsOnMainThread)
                 throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
-            // Note that this will deadlock if OpenOrUpdate wasn't called ahead of time.
-            var lastModel = _computation.WaitAndGetResult();
+            // TODO: see what happens when OpenOrUpdate hasn't been called yet
+            var lastModel = _computation.WaitAndGetResult(token);
+            if (lastModel == null)
+            {
+                return false;
+            }
             if (lastModel.UniqueItem != null)
             {
                 CommitItem(default(char), lastModel.UniqueItem, token);
@@ -134,14 +136,17 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// and it is not default(char) when commit happens as a result of typing a commit character.</param>
         CommitBehavior IAsyncCompletionSession.Commit(char typedChar, CancellationToken token)
         {
-            if (_isDismissed)
+            if (IsDismissed)
                 return CommitBehavior.None;
 
             if (!JoinableTaskContext.IsOnMainThread)
                 throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
-            var lastModel = _computation.WaitAndGetResult();
-
+            var lastModel = _computation.WaitAndGetResult(token);
+            if (lastModel == null)
+            {
+                return CommitBehavior.None;
+            }
             if (lastModel.UseSoftSelection && !typedChar.Equals(default(char)))
             {
                 // In soft selection mode, user commits explicitly (click, tab, e.g. not tied to a text change). Otherwise, we dismiss the session
@@ -174,12 +179,15 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         private CommitBehavior CommitItem(char typedChar, CompletionItem itemToCommit, CancellationToken token)
         {
             CommitBehavior behavior = CommitBehavior.None;
-            if (_isDismissed)
+            if (IsDismissed)
                 return behavior;
 
-            var lastModel = _computation.WaitAndGetResult();
+            var lastModel = _computation.WaitAndGetResult(token);
+            if (lastModel == null)
+            {
+                return CommitBehavior.None;
+            }
 
-            // Telemetry
             UiStopwatch.Restart();
             IAsyncCompletionCommitManager managerWhoCommitted = null;
 
@@ -191,13 +199,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 var args = _guardedOperations.CallExtensionPoint(
                     errorSource: commitManager,
                     call: () => commitManager.Item1.TryCommit(_textView, commitManager.Item2 /* buffer */, itemToCommit, lastModel.ApplicableSpan, typedChar, token),
-                    valueOnThrow: new CommitResult(handled: false));
+                    valueOnThrow: CommitResult.Unhandled);
 
                 if (behavior == CommitBehavior.None)
                     behavior = args.Behavior;
 
-                commitHandled |= args.Handled;
-                if (args.Handled)
+                commitHandled |= args.IsHandled;
+                if (args.IsHandled)
                 {
                     managerWhoCommitted = commitManager.Item1;
                     break;
@@ -230,10 +238,10 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         public void Dismiss()
         {
-            if (_isDismissed)
+            if (IsDismissed)
                 return;
 
-            _isDismissed = true;
+            IsDismissed = true;
             _broker.ForgetSession(this);
             _guardedOperations.RaiseEvent(this, Dismissed);
             _textView.Caret.PositionChanged -= OnCaretPositionChanged;
@@ -259,8 +267,11 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         void IAsyncCompletionSession.OpenOrUpdate(CompletionTrigger trigger, SnapshotPoint triggerLocation, CancellationToken commandToken)
         {
-            if (_isDismissed)
+            if (IsDismissed)
                 return;
+
+            if (!JoinableTaskContext.IsOnMainThread)
+                throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
             commandToken.Register(_computationCancellation.Cancel);
 
@@ -268,6 +279,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             {
                 _computation = new ModelComputation<CompletionModel>(
                     PrioritizedTaskScheduler.AboveNormalInstance,
+                    JoinableTaskContext,
                     (model, token) => GetInitialModel(_textView, trigger, triggerLocation, token),
                     _computationCancellation.Token,
                     _guardedOperations,
@@ -281,12 +293,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         internal void InvokeAndCommitIfUnique(CompletionTrigger trigger, SnapshotPoint triggerLocation, CancellationToken token)
         {
-            if (_isDismissed)
+            if (IsDismissed)
                 return;
 
             if (_computation == null)
             {
-                // Do not recompute, since this may change the selection.
+                // Compute the unique item.
+                // Don't recompute If we already have a model, so that we don't change user's selection.
                 ((IAsyncCompletionSession)this).OpenOrUpdate(trigger, triggerLocation, token);
             }
 
@@ -413,7 +426,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         internal void IgnoreCaretMovement(bool ignore)
         {
-            if (_isDismissed)
+            if (IsDismissed)
                 return; // This method will be called after committing. Don't act on it.
 
             _ignoreCaretMovement = ignore;
@@ -424,12 +437,12 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             }
         }
 
-        async Task ICompletionComputationCallbackHandler<CompletionModel>.UpdateUi(CompletionModel model)
+        async Task ICompletionComputationCallbackHandler<CompletionModel>.UpdateUi(CompletionModel model, CancellationToken token)
         {
             if (_presenterProvider == null) return;
-            await JoinableTaskContext.Factory.SwitchToMainThreadAsync();
+            await JoinableTaskContext.Factory.SwitchToMainThreadAsync(token);
+            if (token.IsCancellationRequested) return;
             UpdateUiInner(model);
-            await TaskScheduler.Default;
         }
 
         /// <summary>
@@ -438,13 +451,14 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// <param name="model"></param>
         private void UpdateUiInner(CompletionModel model)
         {
-            if (_isDismissed)
+            if (IsDismissed)
                 return;
-            // TODO: Consider building CompletionPresentationViewModel in BG and passing it here
-
+            if (model == null)
+                throw new ArgumentNullException(nameof(model));
             if (!JoinableTaskContext.IsOnMainThread)
                 throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
+            // TODO: Consider building CompletionPresentationViewModel in BG and passing it here
             UiStopwatch.Restart();
             if (_gui == null)
             {
@@ -481,33 +495,38 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// </summary>
         private async Task<CompletionModel> GetInitialModel(ITextView view, CompletionTrigger trigger, SnapshotPoint triggerLocation, CancellationToken token)
         {
-            // Map the trigger location to respective view for each completion provider
-            var getCompletionTasks = new Task<CompletionContext>[_completionSources.Count];
+            bool sourceUsesSuggestionMode = false;
+            bool sourceUsesSoftSelection = false;
+            string suggestionModeDescription = string.Empty;
+            var initialItemsBuilder = ImmutableArray.CreateBuilder<CompletionItem>();
+
             for (int i = 0; i < _completionSources.Count; i++)
             {
-                var index = i; // Capture current value of i
-                getCompletionTasks[i] = Task.Run(async () =>
-                {
-                    var source = _completionSources[index].Source;
-                    var point = _completionSources[index].Point;
-                    var context = await _guardedOperations.CallExtensionPointAsync(
-                        errorSource: _completionSources[index].Source,
-                        asyncCall: () => _completionSources[index].Source.GetCompletionContextAsync(trigger, point, _initialApplicableSpan, token),
-                        valueOnThrow: null
-                    );
-                    return context;
-                    // TODO: simplify this. I no longer need to collect the source, point and context.
-                });
-            }
-            var nestedResults = await Task.WhenAll(getCompletionTasks);
-            var initialCompletionItems = nestedResults.Where(n => n != null && !n.Items.IsDefaultOrEmpty).SelectMany(n => n.Items).ToImmutableArray();
+                var index = i;
+                var context = await _guardedOperations.CallExtensionPointAsync(
+                    errorSource: _completionSources[index].Source,
+                    asyncCall: () => _completionSources[index].Source.GetCompletionContextAsync(trigger, _completionSources[index].Point, _initialApplicableSpan, token),
+                    valueOnThrow: null
+                );
 
-            // Do not continue with empty session
-            if (initialCompletionItems.IsEmpty)
+                if (context == null)
+                    continue;
+
+                sourceUsesSuggestionMode |= context.UseSuggestionMode;
+                sourceUsesSoftSelection |= context.UseSoftSelection;
+                if (context != null && !context.Items.IsDefaultOrEmpty)
+                    initialItemsBuilder.AddRange(context.Items);
+                if (string.IsNullOrEmpty(suggestionModeDescription) && !string.IsNullOrEmpty(context.SuggestionModeDescription))
+                    suggestionModeDescription = context.SuggestionModeDescription;
+            }
+
+            // Do not continue without items
+            if (initialItemsBuilder.Count == 0)
             {
                 ((IAsyncCompletionSession)this).Dismiss();
                 return default(CompletionModel);
             }
+            var initialCompletionItems = initialItemsBuilder.ToImmutable();
 
             var availableFilters = initialCompletionItems
                 .SelectMany(n => n.Filters)
@@ -517,18 +536,14 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
             var applicableSpan = triggerLocation.Snapshot.CreateTrackingSpan(_initialApplicableSpan, SpanTrackingMode.EdgeInclusive);
 
-            var startInSuggestionMode = CompletionUtilities.GetSuggestionModeOption(TextView);
-            var sourceProvidedSuggestionItem = nestedResults.Any(n => n != null && n.UseSuggestionMode);
-            var suggestionModeDescription = nestedResults.FirstOrDefault(n => !string.IsNullOrEmpty(n?.SuggestionModeDescription))?.SuggestionModeDescription ?? string.Empty;
-
             // Starting in suggestion mode also means using soft selection,
             // unless source provided an explicit suggestion item. Then we hard select it.
             // We also use soft selection if source explicitly ordered us to.
-            var useSoftSelection
-                = (!sourceProvidedSuggestionItem && startInSuggestionMode)
-                || nestedResults.Any(n => n != null && n.UseSoftSelection);
-            var useSuggestionMode = startInSuggestionMode || sourceProvidedSuggestionItem;
-            var selectSuggestionItem = sourceProvidedSuggestionItem;
+            var startInSuggestionMode = CompletionUtilities.GetSuggestionModeOption(TextView);
+            var useSoftSelection = (!sourceUsesSuggestionMode && startInSuggestionMode) || sourceUsesSoftSelection;
+            var useSuggestionMode = startInSuggestionMode || sourceUsesSuggestionMode;
+            // Don't select suggestion item unless a source explicitly provided it (e.g. User turned on suggestion mode with Ctrl+Alt+Space)
+            var selectSuggestionItem = sourceUsesSuggestionMode;
 
 #if DEBUG
             Debug.WriteLine("Completion session got data.");
@@ -556,6 +571,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// </summary>
         private Task<CompletionModel> HandleCaretPositionChanged(CompletionModel model, CaretPosition caretPosition)
         {
+            if (model == default(CompletionModel))
+                return Task.FromResult(model);
+
             if (!(model.ApplicableSpan.GetSpan(caretPosition.VirtualBufferPosition.Position.Snapshot).IntersectsWith(new SnapshotSpan(caretPosition.VirtualBufferPosition.Position, 0))))
             {
                 ((IAsyncCompletionSession)this).Dismiss();
@@ -568,7 +586,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// </summary>
         private Task<CompletionModel> ToggleCompletionModeInner(CompletionModel model, CancellationToken token, bool useSuggestionMode)
         {
-            // TODO: actually, recompute everythnig.
+            // TODO: Call IAsyncCompletionItemManager and  recompute everything.
             // CompletionFilterReason should get SuggestionModeToggled
             // pass suggestion mode setting to UpdateCompletionListAsync
             return Task.FromResult(model.WithSuggestionModeActive(useSuggestionMode));
@@ -804,13 +822,16 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         public ImmutableArray<CompletionItem> GetItems(CancellationToken token)
         {
             // TODO: Consider returning array of CompletionItemWithHighlight so that we don't do linq here
-            return _computation.RecentModel.PresentedItems.Select(n => n.CompletionItem).ToImmutableArray();
+            return _computation?.RecentModel?.PresentedItems.Select(n => n.CompletionItem).ToImmutableArray()
+                ?? ImmutableArray<CompletionItem>.Empty;
         }
 
         public CompletionItem GetSelectedItem(CancellationToken token)
         {
-            var model = _computation.RecentModel;
-            if (model.SelectSuggestionItem)
+            var model = _computation?.RecentModel;
+            if (model == default(CompletionModel))
+                return null;
+            else if (model.SelectSuggestionItem)
                 return model.SuggestionModeItem;
             else
                 return model.PresentedItems[model.SelectedIndex].CompletionItem;

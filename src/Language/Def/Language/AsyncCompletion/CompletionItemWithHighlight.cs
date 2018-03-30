@@ -9,7 +9,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
     /// Wraps <see cref="CompletionItem"/> with information about highlighted parts of its <see cref="CompletionItem.DisplayText"/>.
     /// </summary>
     [DebuggerDisplay("{CompletionItem}")]
-    public struct CompletionItemWithHighlight
+    public struct CompletionItemWithHighlight : IEquatable<CompletionItemWithHighlight>
     {
         /// <summary>
         /// The completion item
@@ -44,5 +44,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
                 throw new ArgumentException("Array must be initialized", nameof(highlightedSpans));
             HighlightedSpans = highlightedSpans;
         }
+
+        bool IEquatable<CompletionItemWithHighlight>.Equals(CompletionItemWithHighlight other)
+            => CompletionItem.Equals(other.CompletionItem) && HighlightedSpans.Equals(other.HighlightedSpans);
     }
 }

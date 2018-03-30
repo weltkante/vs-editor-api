@@ -26,8 +26,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 textView.BufferGraph.MapDownToBuffer(point, PointTrackingMode.Negative, n, PositionAffinity.Predecessor) != null);
         }
 
-        static readonly EditorOptionKey<bool> SuggestionModeOptionKey = new EditorOptionKey<bool>(KnownCompletionNames.SuggestionModeInCompletionOptionName);
-        static readonly EditorOptionKey<bool> SuggestionModeInDebuggerCompletionOptionKey = new EditorOptionKey<bool>(KnownCompletionNames.SuggestionModeInDebuggerCompletionOptionName);
+        static readonly EditorOptionKey<bool> SuggestionModeOptionKey = new EditorOptionKey<bool>(PredefinedCompletionNames.SuggestionModeInCompletionOptionName);
+        static readonly EditorOptionKey<bool> SuggestionModeInDebuggerCompletionOptionKey = new EditorOptionKey<bool>(PredefinedCompletionNames.SuggestionModeInDebuggerCompletionOptionName);
         private const bool UseSuggestionModeDefaultValue = false;
         private const bool UseSuggestionModeInDebuggerCompletionDefaultValue = true;
 
@@ -38,7 +38,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
             public override Type ValueType => typeof(bool);
 
-            public override string Name => KnownCompletionNames.SuggestionModeInCompletionOptionName;
+            public override string Name => PredefinedCompletionNames.SuggestionModeInCompletionOptionName;
         }
 
         [Export(typeof(EditorOptionDefinition))]
@@ -48,7 +48,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
             public override Type ValueType => typeof(bool);
 
-            public override string Name => KnownCompletionNames.SuggestionModeInDebuggerCompletionOptionName;
+            public override string Name => PredefinedCompletionNames.SuggestionModeInDebuggerCompletionOptionName;
         }
 
         internal static bool GetSuggestionModeOption(ITextView textView)

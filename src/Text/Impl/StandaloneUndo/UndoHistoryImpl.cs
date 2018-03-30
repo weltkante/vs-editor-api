@@ -8,13 +8,11 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Collections.ObjectModel;
-using System.ComponentModel.Composition;
 using Microsoft.VisualStudio.Utilities;
 
 namespace Microsoft.VisualStudio.Text.Operations.Standalone
 {
-    internal class UndoHistoryImpl : ITextUndoHistory
+    internal class UndoHistoryImpl : ITextUndoHistory2
     {
         public event EventHandler<TextUndoRedoEventArgs> UndoRedoHappened;
         public event EventHandler<TextUndoTransactionCompletedEventArgs> UndoTransactionCompleted;
@@ -188,6 +186,13 @@ namespace Microsoft.VisualStudio.Text.Operations.Standalone
             get { return this.state; }
         }
 
+        public ITextUndoTransaction CreateInvisibleTransaction(string description)
+        {
+            // Standalone undo doesn't support invisible transactions so simply return
+            // a normal transaction.
+            return this.CreateTransaction(description);
+        }
+
         /// <summary>
         /// Creates a new transaction, nests it in the previously current transaction, and marks it current.
         /// If there is a redo stack, it gets cleared.
@@ -198,9 +203,9 @@ namespace Microsoft.VisualStudio.Text.Operations.Standalone
         /// <returns></returns>
         public ITextUndoTransaction CreateTransaction(string description)
         {
-            if (String.IsNullOrEmpty(description))
+            if (string.IsNullOrEmpty(description))
             {
-                throw new ArgumentNullException("description", String.Format(CultureInfo.CurrentUICulture, "Strings.ArgumentCannotBeNull", "CreateTransaction", "description"));
+                throw new ArgumentNullException(nameof(description));
             }
 
             // If there is a pending transaction that has already been completed, we should not be permitted
@@ -244,12 +249,12 @@ namespace Microsoft.VisualStudio.Text.Operations.Standalone
         {
             if (count <= 0)
             {
-                throw new ArgumentException(String.Format(CultureInfo.CurrentUICulture, "Strings.RedoAndUndoAcceptOnlyPositiveCounts", "Undo", count), "count");
+                throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, "Strings.RedoAndUndoAcceptOnlyPositiveCounts", "Undo", count), nameof(count));
             }
 
             if (!IsThereEnoughVisibleTransactions(this.undoStack, count))
             {
-                throw new InvalidOperationException(String.Format(CultureInfo.CurrentUICulture, "Strings.CannotUndoMoreTransactionsThanExist", "undo", count));
+                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, "Strings.CannotUndoMoreTransactionsThanExist", "undo", count));
             }
 
             TextUndoHistoryState originalState = this.state;
@@ -321,12 +326,12 @@ namespace Microsoft.VisualStudio.Text.Operations.Standalone
         {
             if (count <= 0)
             {
-                throw new ArgumentException(String.Format(CultureInfo.CurrentUICulture, "Strings.RedoAndUndoAcceptOnlyPositiveCounts", "Redo", count), "count");
+                throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, "Strings.RedoAndUndoAcceptOnlyPositiveCounts", "Redo", count), nameof(count));
             }
 
             if (!IsThereEnoughVisibleTransactions(this.redoStack, count))
             {
-                throw new InvalidOperationException(String.Format(CultureInfo.CurrentUICulture, "Strings.CannotUndoMoreTransactionsThanExist", "redo", count));
+                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, "Strings.CannotUndoMoreTransactionsThanExist", "redo", count));
             }
 
             TextUndoHistoryState originalState = this.state;

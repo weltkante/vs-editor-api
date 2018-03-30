@@ -22,7 +22,11 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// <param name="originalPoint"></param>
         /// <param name="imports"></param>
         /// <returns></returns>
-        internal static IEnumerable<(ITextBuffer buffer, SnapshotPoint point, Lazy<T, TMetadata> import)> GetOrderedBuffersAndImports(ITextView textView, SnapshotPoint location, Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<T, TMetadata>>> getImports, IComparer<IEnumerable<string>> contentTypeComparer)
+        internal static IEnumerable<(ITextBuffer buffer, SnapshotPoint point, Lazy<T, TMetadata> import)> GetOrderedBuffersAndImports(
+            ITextView textView,
+            SnapshotPoint location,
+            Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<T, TMetadata>>> getImports,
+            IComparer<IEnumerable<string>> contentTypeComparer)
         {
             // This method is created based on EditorCommandHandlerService.GetOrderedBuffersAndCommandHandlers
 
@@ -127,7 +131,10 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// <param name="getImports"></param>
         /// <param name="contentTypeComparer"></param>
         /// <returns></returns>
-        internal static IEnumerable<(ITextBuffer buffer, SnapshotPoint point, Lazy<T, TMetadata> import)> GetBuffersAndImports(ITextView textView, SnapshotPoint location, Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<T, TMetadata>>> getImports)
+        internal static IEnumerable<(ITextBuffer buffer, SnapshotPoint point, Lazy<T, TMetadata> import)> GetBuffersAndImports(
+            ITextView textView,
+            SnapshotPoint location,
+            Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<T, TMetadata>>> getImports)
         {
             var mappedPointsEnumeration = GetPointsOnAvailableBuffers(textView, location);
             if (!mappedPointsEnumeration.Any())

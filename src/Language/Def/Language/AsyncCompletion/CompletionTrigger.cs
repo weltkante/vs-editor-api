@@ -9,7 +9,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
     /// we map the point to a buffer with matching content type.
     /// </summary>
     [DebuggerDisplay("{Reason} {Character}")]
-    public struct CompletionTrigger
+    public struct CompletionTrigger : IEquatable<CompletionTrigger>
     {
         /// <summary>
         /// The reason that completion was started.
@@ -38,5 +38,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// <param name="reason">The kind of action that triggered completion to start</param>
         public CompletionTrigger(CompletionTriggerReason reason) : this(reason, default(char))
         { }
+
+        bool IEquatable<CompletionTrigger>.Equals(CompletionTrigger other) => Reason.Equals(other.Reason) && Character.Equals(other.Character);
     }
 }

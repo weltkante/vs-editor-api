@@ -20,7 +20,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         [Import]
         private IGuardedOperations GuardedOperations;
 
-        [Import]
+        [Import(AllowDefault = true)]
         private JoinableTaskContext JoinableTaskContext;
 
         [Import]
@@ -132,7 +132,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                     errorSource: manager,
                     call: () =>
                     {
-                        var characters = manager.GetPotentialCommitCharacters();
+                        var characters = manager.PotentialCommitCharacters;
                         potentialCommitCharsBuilder.AddRange(characters);
                     });
                 managersWithBuffers.Add((manager, managerWithData.buffer));

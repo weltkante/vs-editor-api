@@ -87,7 +87,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
 
             Items = items;
             Filters = filters;
-            ApplicableSpan = applicableSpan ?? throw new NullReferenceException(nameof(ApplicableSpan));
+            ApplicableSpan = applicableSpan ?? throw new NullReferenceException(nameof(applicableSpan));
             UseSoftSelection = useSoftSelection;
             UseSuggestionMode = useSuggestionMode;
             SelectSuggestionMode = selectSuggestionMode;

@@ -25,7 +25,7 @@ namespace Microsoft.VisualStudio.Text.Utilities
         private List<Lazy<IExtensionErrorHandler>> _errorHandlerExports = null;
 
         [ImportMany]
-        private List<Lazy<IExtensionPerformanceTracker>> _perTrackerExports = null;
+        private List<Lazy<IExtensionPerformanceTracker>> _perfTrackerExports = null;
 
         [Import]
         private JoinableTaskContext _joinableTaskContext;
@@ -98,13 +98,13 @@ namespace Microsoft.VisualStudio.Text.Utilities
                 if (_perfTrackers == null)
                 {
                     _perfTrackers = new FrugalList<IExtensionPerformanceTracker>();
-                    if (_perTrackerExports != null)       // can be null during unit testing
+                    if (_perfTrackerExports != null)       // can be null during unit testing
                     {
-                        foreach (var export in _perTrackerExports)
+                        for (int i = 0; i < _perfTrackerExports.Count; i++)
                         {
                             try
                             {
-                                var perfTracker = export.Value;
+                                var perfTracker = _perfTrackerExports[i].Value;
                                 if (perfTracker != null)
                                 {
                                     _perfTrackers.Add(perfTracker);
@@ -420,6 +420,7 @@ namespace Microsoft.VisualStudio.Text.Utilities
             {
                 await asyncAction();
             }
+            catch (OperationCanceledException) { } // swallow OperationCanceledException in async method calls
             catch (Exception e)
             {
                 HandleException(errorSource, e);
@@ -436,6 +437,11 @@ namespace Microsoft.VisualStudio.Text.Utilities
             try
             {
                 return await asyncCall();
+            }
+            catch (OperationCanceledException)
+            {
+                // swallow OperationCanceledException in async method calls
+                return valueOnThrow;
             }
             catch (Exception e)
             {
@@ -509,15 +515,15 @@ namespace Microsoft.VisualStudio.Text.Utilities
                 return;
             }
 
-            foreach (var perfTracker in PerfTrackers)
+            for (int i = 0; i < PerfTrackers.Count; i++)
             {
                 try
                 {
-                    perfTracker.AfterCallingEventHandler(handler);
+                    PerfTrackers[i].AfterCallingEventHandler(handler);
                 }
                 catch (Exception e)
                 {
-                    HandleException(perfTracker, e);
+                    HandleException(PerfTrackers[i], e);
                 }
             }
         }
@@ -529,15 +535,15 @@ namespace Microsoft.VisualStudio.Text.Utilities
                 return;
             }
 
-            foreach (var perfTracker in PerfTrackers)
+            for (int i = 0; i < PerfTrackers.Count; i++)
             {
                 try
                 {
-                    perfTracker.AfterCallingExtension(extensionPoint);
+                    PerfTrackers[i].AfterCallingExtension(extensionPoint);
                 }
                 catch (Exception e)
                 {
-                    HandleException(perfTracker, e);
+                    HandleException(PerfTrackers[i], e);
                 }
             }
         }
@@ -549,15 +555,15 @@ namespace Microsoft.VisualStudio.Text.Utilities
                 return;
             }
 
-            foreach (var perfTracker in PerfTrackers)
+            for (int i = 0; i < PerfTrackers.Count; i++)
             {
                 try
                 {
-                    perfTracker.BeforeCallingEventHandler(handler);
+                    PerfTrackers[i].BeforeCallingEventHandler(handler);
                 }
                 catch (Exception e)
                 {
-                    HandleException(perfTracker, e);
+                    HandleException(PerfTrackers[i], e);
                 }
             }
         }
@@ -569,15 +575,15 @@ namespace Microsoft.VisualStudio.Text.Utilities
                 return;
             }
 
-            foreach (var perfTracker in PerfTrackers)
+            for (int i = 0; i < PerfTrackers.Count; i++)
             {
                 try
                 {
-                    perfTracker.BeforeCallingExtension(extensionPoint);
+                    PerfTrackers[i].BeforeCallingExtension(extensionPoint);
                 }
                 catch (Exception e)
                 {
-                    HandleException(perfTracker, e);
+                    HandleException(PerfTrackers[i], e);
                 }
             }
         }

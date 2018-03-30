@@ -6,7 +6,7 @@ namespace Microsoft.VisualStudio.Core.Imaging
     /// <summary>
     /// Unique identifier for Visual Studio image asset, with extra properties used in accessibility scenarios.
     /// </summary>
-    public struct AccessibleImageId
+    public struct AccessibleImageId : IEquatable<AccessibleImageId>
     {
         /// <summary>
         /// Identifier for Visual Studio image asset.
@@ -49,5 +49,7 @@ namespace Microsoft.VisualStudio.Core.Imaging
             this.ImageId = imageId;
             AutomationName = automationName;
         }
+
+        bool IEquatable<AccessibleImageId>.Equals(AccessibleImageId other) => ImageId.Equals(other.ImageId);
     }
 }

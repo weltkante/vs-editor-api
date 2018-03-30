@@ -9,7 +9,7 @@
     /// On Windows systems, <see cref="ImageId"/> can be converted to and from
     /// various other image representations via the ImageIdExtensions extension methods.
     /// </remarks>
-    public struct ImageId
+    public struct ImageId : IEquatable<ImageId>
     {
         /// <summary>
         /// The <see cref="Guid"/> identifying the group to which this image belongs.
@@ -31,5 +31,7 @@
             this.Guid = guid;
             this.Id = id;
         }
+
+        bool IEquatable<ImageId>.Equals(ImageId other) => Id.Equals(other.Id) && Guid.Equals(other.Guid);
     }
 }

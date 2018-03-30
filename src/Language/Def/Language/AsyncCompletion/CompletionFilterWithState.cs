@@ -69,6 +69,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
                 : new CompletionFilterWithState(Filter, IsAvailable, isSelected);
         }
 
+        /// <summary>
+        /// Override for nice debugger display
+        /// </summary>
         public override string ToString()
         {
             var availableStatus = IsAvailable ? "available" : "unavailable";

@@ -13,12 +13,12 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
     /// Only one <see cref="ICompletionPresenterProvider"/> is used in a given view.
     /// </remarks>
     /// <example>
-    ///     [Export(typeof(ICompletionUIFactory))]
-    ///     [Name(nameof(MyCompletionUIFactory))]
+    ///     [Export(typeof(ICompletionPresenterProvider))]
+    ///     [Name(nameof(MyCompletionPresenterProvider))]
     ///     [ContentType("any")]
     ///     [TextViewRoles(PredefinedTextViewRoles.Editable)]
-    ///     [Order(Before = nameof(MyOtherCompletionUIFactory))]
-    ///     public class MyCompletionUIFactory : ICompletionUIFactory
+    ///     [Order(Before = KnownCompletionNames.DefaultCompletionPresenter)]
+    ///     public class MyCompletionPresenterProvider : ICompletionPresenterProvider
     /// </example>
     public interface ICompletionPresenterProvider
     {
@@ -33,8 +33,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// <summary>
         /// Declares size of the jump when user presses PageUp and PageDown keys.
         /// </summary>
-        /// <remarks>This value is read by the controller that processes scrolling and selection.
-        /// The <see cref="ICompletionPresenter"/> is just a view that doesn't participate in keyboard scrolling.</remarks>
+        /// <remarks>This value needs to be known before the UI is created, hence it is defined on this class instead of <see cref="ICompletionPresenter"/>.
+        /// Note that <see cref="ICompletionPresenter"/> is just a view that doesn't participate in keyboard scrolling</remarks>
         int ResultsPerPage { get; }
     }
 }

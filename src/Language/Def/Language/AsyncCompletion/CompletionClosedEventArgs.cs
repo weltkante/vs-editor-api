@@ -10,6 +10,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
     /// </summary>
     public sealed class CompletionClosedEventArgs : EventArgs
     {
+        /// <summary>
+        /// <see cref="ITextView"/> that hosted completion UI
+        /// </summary>
         public ITextView TextView { get; }
 
         /// <summary>

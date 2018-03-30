@@ -14,7 +14,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
     public interface IAsyncCompletionSession
     {
         /// <summary>
-        /// Request completion to be opened or updated in a given location, completion items filtered and sorted, and the UI updated.
+        /// Request completion to be opened or updated in a given location,
+        /// the completion items to be filtered and sorted, and the UI updated.
+        /// Must be called on UI thread. Enqueues work on a worker thread.
         /// </summary>
         /// <param name="trigger">What caused completion</param>
         /// <param name="triggerLocation">Location of the trigger on the subject buffer</param>
@@ -23,8 +25,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
 
         /// <summary>
         /// Stops the session and hides associated UI.
+        /// May be called from any thread.
         /// </summary>
-        /// <returns></returns>
         void Dismiss();
 
         /// <summary>
@@ -72,6 +74,11 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// </summary>
         event EventHandler Dismissed;
 
+        /// <summary>
+        /// Provides elements that are visible in the UI
+        /// Fired when computation, filtering and sorting of items has finished.
+        /// There may be more updates happening immediately after this update.
+        /// </summary>
         event EventHandler<CompletionItemsWithHighlightEventArgs> ItemsUpdated;
 
         /// <summary>
