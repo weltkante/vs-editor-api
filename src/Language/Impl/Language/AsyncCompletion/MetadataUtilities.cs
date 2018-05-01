@@ -145,7 +145,6 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
             // An array of per-buffer buckets, each containing cached list of matching imports,
             // ordered by [Order] and content type specificity
-            var importBuckets = new ImportBucket<T, TMetadata>[buffers.Length];
             for (int i = 0; i < buffers.Length; i++)
             {
                 foreach (var import in getImports(buffers[i].ContentType, textView.Roles))

@@ -69,6 +69,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         private const string IsCompletionAvailableProperty = "IsCompletionAvailable";
         private Dictionary<IContentType, bool> FeatureAvailabilityByContentType = new Dictionary<IContentType, bool>();
 
+        public event EventHandler<CompletionTriggeredEventArgs> CompletionTriggered;
+
         bool IAsyncCompletionBroker.IsCompletionActive(ITextView textView)
         {
             return textView.Properties.ContainsProperty(typeof(IAsyncCompletionSession));
@@ -111,8 +113,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             if (!JoinableTaskContext.IsOnMainThread)
                 throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
-            var sourcesWithData = MetadataUtilities<IAsyncCompletionSourceProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetBuffersAndImports(textView, triggerLocation, GetCompletionItemSourceProviders);
-            var commitManagersWithData = MetadataUtilities<IAsyncCompletionCommitManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetBuffersAndImports(textView, triggerLocation, GetCompletionCommitManagerProviders);
+            var sourcesWithData = MetadataUtilities<IAsyncCompletionSourceProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetBuffersAndImports(textView, triggerLocation, GetItemSourceProviders);
+            var commitManagersWithData = MetadataUtilities<IAsyncCompletionCommitManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetBuffersAndImports(textView, triggerLocation, GetCommitManagerProviders);
 
             // Obtain potential commit characters
             var potentialCommitCharsBuilder = ImmutableArray.CreateBuilder<char>();
@@ -179,19 +181,19 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             if (_contentTypeComparer == null)
                 _contentTypeComparer = new StableContentTypeComparer(ContentTypeRegistryService);
 
-            var servicesWithLocations = MetadataUtilities<IAsyncCompletionItemManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetOrderedBuffersAndImports(textView, triggerLocation, GetServiceProviders, _contentTypeComparer);
-            var bestServiceWithData = servicesWithLocations.FirstOrDefault();
-            var serviceProvider = GuardedOperations.InstantiateExtension(this, bestServiceWithData.import);
-            var itemManager = GuardedOperations.CallExtensionPoint(serviceProvider, () => serviceProvider.GetOrCreate(textView), null);
-            if (itemManager == null)
+            var itemManagerProvidersWithData = MetadataUtilities<IAsyncCompletionItemManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetOrderedBuffersAndImports(textView, triggerLocation, GetItemManagerProviders, _contentTypeComparer);
+            if (!itemManagerProvidersWithData.Any())
             {
                 // This should never happen because we provide a default and IsCompletionFeatureAvailable would have returned false 
                 throw new InvalidOperationException("No completion services not found. Completion will be unavailable.");
             }
+            var bestItemManagerProvider = GuardedOperations.InstantiateExtension(this, itemManagerProvidersWithData.First().import);
+            var itemManager = GuardedOperations.CallExtensionPoint(bestItemManagerProvider, () => bestItemManagerProvider.GetOrCreate(textView), null);
 
-            var presentationProvidersWithLocations = MetadataUtilities<ICompletionPresenterProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetOrderedBuffersAndImports(textView, triggerLocation, GetPresenters, _contentTypeComparer);
-            var bestPresentationProviderWithLocation = presentationProvidersWithLocations.FirstOrDefault();
-            var presenterProvider = GuardedOperations.InstantiateExtension(this, bestPresentationProviderWithLocation.import);
+            var presenterProvidersWithData = MetadataUtilities<ICompletionPresenterProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetOrderedBuffersAndImports(textView, triggerLocation, GetPresenters, _contentTypeComparer);
+            ICompletionPresenterProvider presenterProvider = null;
+            if (presenterProvidersWithData.Any())
+                presenterProvider = GuardedOperations.InstantiateExtension(this, presenterProvidersWithData.First().import);
 
             if (firstRun)
             {
@@ -205,7 +207,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             textView.Closed += TextView_Closed;
 
             // Additionally, emulate the legacy completion telemetry
-            EmulateLegacyCompletionTelemetry(bestServiceWithData.buffer?.ContentType, textView);
+            EmulateLegacyCompletionTelemetry(itemManagerProvidersWithData.First().buffer?.ContentType, textView);
+
+            GuardedOperations.RaiseEvent(this, CompletionTriggered, new CompletionTriggeredEventArgs(session, textView));
 
             return session;
         }
@@ -220,17 +224,17 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             session.TextView.Properties.RemoveProperty(typeof(IAsyncCompletionSession));
         }
 
-        private IReadOnlyList<Lazy<IAsyncCompletionSourceProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>> GetCompletionItemSourceProviders(IContentType contentType, ITextViewRoleSet textViewRoles)
+        private IReadOnlyList<Lazy<IAsyncCompletionSourceProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>> GetItemSourceProviders(IContentType contentType, ITextViewRoleSet textViewRoles)
         {
             return OrderedCompletionSourceProviders.Where(n => n.Metadata.ContentTypes.Any(c => contentType.IsOfType(c)) && (n.Metadata.TextViewRoles == null || textViewRoles.ContainsAny(n.Metadata.TextViewRoles))).ToList();
         }
 
-        private IReadOnlyList<Lazy<IAsyncCompletionItemManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>> GetServiceProviders(IContentType contentType, ITextViewRoleSet textViewRoles)
+        private IReadOnlyList<Lazy<IAsyncCompletionItemManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>> GetItemManagerProviders(IContentType contentType, ITextViewRoleSet textViewRoles)
         {
             return OrderedCompletionItemManagerProviders.Where(n => n.Metadata.ContentTypes.Any(c => contentType.IsOfType(c)) && (n.Metadata.TextViewRoles == null || textViewRoles.ContainsAny(n.Metadata.TextViewRoles))).OrderBy(n => n.Metadata.ContentTypes, _contentTypeComparer).ToList();
         }
 
-        private IReadOnlyList<Lazy<IAsyncCompletionCommitManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>> GetCompletionCommitManagerProviders(IContentType contentType, ITextViewRoleSet textViewRoles)
+        private IReadOnlyList<Lazy<IAsyncCompletionCommitManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>> GetCommitManagerProviders(IContentType contentType, ITextViewRoleSet textViewRoles)
         {
             return OrderedCompletionCommitManagerProviders.Where(n => n.Metadata.ContentTypes.Any(c => contentType.IsOfType(c)) && (n.Metadata.TextViewRoles == null || textViewRoles.ContainsAny(n.Metadata.TextViewRoles))).ToList();
         }

@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using Microsoft.VisualStudio.Text.Utilities;
+using Microsoft.VisualStudio.Utilities.Features;
 
 namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
@@ -10,25 +11,26 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
     {
         private const string TreatmentFlightName = "CompletionAPI";
         private static bool _treatmentFlightEnabled;
-        private static bool _initialized;
+        private static bool _treatmentFlightDataInitialized;
 
         /// <summary>
         /// Returns whether or not modern completion should be enabled.
         /// </summary>
         /// <returns>true if experiment is enabled.</returns>
-        public static bool GetFeatureState(IExperimentationServiceInternal experimentationService)
+        public static bool GetFeatureState(IExperimentationServiceInternal experimentationService, IFeatureService featureService)
         {
-            if (_initialized)
-            {
+            if (!featureService.IsEnabled(PredefinedEditorFeatureNames.Completion))
+                return false;
+
+            if (_treatmentFlightDataInitialized)
                 return _treatmentFlightEnabled;
-            }
 
 #if DEBUG
             _treatmentFlightEnabled = true;
 #else
             _treatmentFlightEnabled = experimentationService.IsCachedFlightEnabled(TreatmentFlightName);
 #endif
-            _initialized = true;
+            _treatmentFlightDataInitialized = true;
             return _treatmentFlightEnabled;
         }
     }

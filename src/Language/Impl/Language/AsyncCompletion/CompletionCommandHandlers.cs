@@ -7,6 +7,7 @@ using Microsoft.VisualStudio.Text.Editor.Commanding.Commands;
 using Microsoft.VisualStudio.Text.Operations;
 using Microsoft.VisualStudio.Text.Utilities;
 using Microsoft.VisualStudio.Utilities;
+using Microsoft.VisualStudio.Utilities.Features;
 using CommonImplementation = Microsoft.VisualStudio.Language.Intellisense.Implementation;
 
 namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
@@ -31,17 +32,21 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         IChainedCommandHandler<DeleteKeyCommandArgs>,
         ICommandHandler<WordDeleteToEndCommandArgs>,
         ICommandHandler<WordDeleteToStartCommandArgs>,
-        ICommandHandler<ReturnKeyCommandArgs>,
+        ICommandHandler<RenameCommandArgs>,
+        ICommandHandler<UndoCommandArgs>,
         ICommandHandler<RedoCommandArgs>,
+        ICommandHandler<ReturnKeyCommandArgs>,
         ICommandHandler<TabKeyCommandArgs>,
-        IChainedCommandHandler<TypeCharCommandArgs>,
-        ICommandHandler<UndoCommandArgs>
+        IChainedCommandHandler<TypeCharCommandArgs>
     {
         [Import]
         IAsyncCompletionBroker Broker;
 
         [Import]
         IExperimentationServiceInternal ExperimentationService;
+
+        [Import]
+        IFeatureService FeatureService;
 
         [Import]
         ITextUndoHistoryRegistry UndoHistoryRegistry;
@@ -59,7 +64,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// <returns></returns>
         private CommandState GetAvailability(IContentType contentType)
         {
-            return ModernCompletionFeature.GetFeatureState(ExperimentationService)
+            return ModernCompletionFeature.GetFeatureState(ExperimentationService, FeatureService)
                 && Broker.IsCompletionSupported(contentType)
                 ? CommandState.Available
                 : CommandState.Unspecified;
@@ -68,7 +73,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         private CommandState GetAvailabilityOfSuggestionMode(IContentType contentType, ITextView textView)
         {
             return new CommandState(
-                isAvailable: ModernCompletionFeature.GetFeatureState(ExperimentationService)
+                isAvailable: ModernCompletionFeature.GetFeatureState(ExperimentationService, FeatureService)
                              && Broker.IsCompletionSupported(contentType),
                 isChecked: CompletionUtilities.GetSuggestionModeOption(textView));
             // TODO: Once we get a special TextViewRole, detect if we are in debugger and ready the option for suggestion mode in debugger window
@@ -124,6 +129,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         bool ICommandHandler<InvokeCompletionListCommandArgs>.ExecuteCommand(InvokeCompletionListCommandArgs args, CommandExecutionContext executionContext)
         {
+            if (!ModernCompletionFeature.GetFeatureState(ExperimentationService, FeatureService))
+                return false;
+
             // If the caret is buried in virtual space, we should realize this virtual space before triggering the session.
             if (args.TextView.Caret.InVirtualSpace)
             {
@@ -148,6 +156,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         bool ICommandHandler<CommitUniqueCompletionListItemCommandArgs>.ExecuteCommand(CommitUniqueCompletionListItemCommandArgs args, CommandExecutionContext executionContext)
         {
+            if (!ModernCompletionFeature.GetFeatureState(ExperimentationService, FeatureService))
+                return false;
+
             // If the caret is buried in virtual space, we should realize this virtual space before triggering the session.
             if (args.TextView.Caret.InVirtualSpace)
             {
@@ -217,12 +228,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         bool ICommandHandler<WordDeleteToEndCommandArgs>.ExecuteCommand(WordDeleteToEndCommandArgs args, CommandExecutionContext executionContext)
         {
             var session = Broker.GetSession(args.TextView);
-            if (session != null)
-            {
-                session.Dismiss();
-                return false; // return false so that the editor can handle this event
-            }
-            return false;
+            session?.Dismiss();
+            return false; // Always return false so that the editor can handle this event
         }
 
         CommandState ICommandHandler<WordDeleteToStartCommandArgs>.GetCommandState(WordDeleteToStartCommandArgs args)
@@ -231,12 +238,28 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         bool ICommandHandler<WordDeleteToStartCommandArgs>.ExecuteCommand(WordDeleteToStartCommandArgs args, CommandExecutionContext executionContext)
         {
             var session = Broker.GetSession(args.TextView);
-            if (session != null)
-            {
-                session.Dismiss();
-                return false; // return false so that the editor can handle this event
-            }
-            return false;
+            session?.Dismiss();
+            return false; // Always return false so that the editor can handle this event
+        }
+
+        CommandState ICommandHandler<RenameCommandArgs>.GetCommandState(RenameCommandArgs args)
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
+
+        bool ICommandHandler<RenameCommandArgs>.ExecuteCommand(RenameCommandArgs args, CommandExecutionContext executionContext)
+        {
+            var session = Broker.GetSession(args.TextView);
+            session?.Dismiss();
+            return false; // Always return false so that the editor can handle this event
+        }
+
+        CommandState ICommandHandler<UndoCommandArgs>.GetCommandState(UndoCommandArgs args)
+            => GetAvailabilityIfCompletionIsUp(args.TextView);
+
+        bool ICommandHandler<UndoCommandArgs>.ExecuteCommand(UndoCommandArgs args, CommandExecutionContext executionContext)
+        {
+            var session = Broker.GetSession(args.TextView);
+            session?.Dismiss();
+            return false; // Always return false so that the editor can handle this event
         }
 
         CommandState ICommandHandler<RedoCommandArgs>.GetCommandState(RedoCommandArgs args)
@@ -245,12 +268,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         bool ICommandHandler<RedoCommandArgs>.ExecuteCommand(RedoCommandArgs args, CommandExecutionContext executionContext)
         {
             var session = Broker.GetSession(args.TextView);
-            if (session != null)
-            {
-                session.Dismiss();
-                return false; // return false so that the editor can handle this event
-            }
-            return false;
+            session?.Dismiss();
+            return false; // Always return false so that the editor can handle this event
         }
 
         CommandState ICommandHandler<ReturnKeyCommandArgs>.GetCommandState(ReturnKeyCommandArgs args)
@@ -294,6 +313,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         void IChainedCommandHandler<TypeCharCommandArgs>.ExecuteCommand(TypeCharCommandArgs args, Action nextCommandHandler, CommandExecutionContext executionContext)
         {
+            if (!ModernCompletionFeature.GetFeatureState(ExperimentationService, FeatureService))
+            {
+                // In IChainedCommandHandler, we have to explicitly call the next command handler
+                nextCommandHandler();
+                return;
+            }
+
             var view = args.TextView;
             var location = view.Caret.Position.BufferPosition;
             var initialTextSnapshot = args.SubjectBuffer.CurrentSnapshot;
@@ -368,20 +394,6 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                     newSession?.OpenOrUpdate(trigger, location, executionContext.OperationContext.UserCancellationToken);
                 }
             }
-        }
-
-        CommandState ICommandHandler<UndoCommandArgs>.GetCommandState(UndoCommandArgs args)
-            => GetAvailabilityIfCompletionIsUp(args.TextView);
-
-        bool ICommandHandler<UndoCommandArgs>.ExecuteCommand(UndoCommandArgs args, CommandExecutionContext executionContext)
-        {
-            var session = Broker.GetSession(args.TextView);
-            if (session != null)
-            {
-                session.Dismiss();
-                return false; // return false so that the editor can handle this event
-            }
-            return false;
         }
 
         CommandState ICommandHandler<DownKeyCommandArgs>.GetCommandState(DownKeyCommandArgs args)

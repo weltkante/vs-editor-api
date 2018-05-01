@@ -12,25 +12,21 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
     /// </summary>
     internal class SuggestionModeCompletionItemSource : IAsyncCompletionSource
     {
-        static IAsyncCompletionSource _instance;
-        internal static IAsyncCompletionSource Instance
+        private SuggestionItemOptions _options;
+
+        internal SuggestionModeCompletionItemSource(SuggestionItemOptions options)
         {
-            get
-            {
-                if (_instance == null)
-                    _instance = new SuggestionModeCompletionItemSource();
-                return _instance;
-            }
+            _options = options ?? throw new ArgumentNullException(nameof(options));
         }
 
         Task<CompletionContext> IAsyncCompletionSource.GetCompletionContextAsync(CompletionTrigger trigger, SnapshotPoint triggerLocation, SnapshotSpan applicableSpan, CancellationToken token)
         {
-            throw new NotImplementedException("This item source is not meant to be registered. It is used only to provide tooltip.");
+            throw new NotImplementedException("This item source is not meant to be registered. It is used only to provide a tooltip.");
         }
 
         Task<object> IAsyncCompletionSource.GetDescriptionAsync(CompletionItem item, CancellationToken token)
         {
-            return Task.FromResult<object>(string.Empty);
+            return Task.FromResult<object>(_options.ToolTipText);
         }
 
         bool IAsyncCompletionSource.TryGetApplicableSpan(char typeChar, SnapshotPoint triggerLocation, out SnapshotSpan applicableSpan)

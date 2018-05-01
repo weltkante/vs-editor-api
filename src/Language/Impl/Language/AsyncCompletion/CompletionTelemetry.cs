@@ -11,31 +11,33 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
     {
         private readonly CompletionTelemetryHost _telemetryHost;
 
-        // Collected data
-        internal string CompletionService { get; private set; }
-        internal string CompletionPresenterProvider { get; private set; }
-        internal string CompletionSource { get; private set; }
+        // Names of parts that participated in completion
+        internal string ItemManagerName { get; private set; }
+        internal string PresenterProviderName { get; private set; }
+        internal string CommitManagerName { get; private set; }
 
+        // "Processing" is work done by IAsyncCompletionItemManager
         internal long InitialProcessingDuration { get; private set; }
         internal long TotalProcessingDuration { get; private set; }
         internal int TotalProcessingCount { get; private set; }
 
+        // "Rendering" is work done on UI thread by ICompletionPresenter
         internal long InitialRenderingDuration { get; private set; }
         internal long TotalRenderingDuration { get; private set; }
         internal int TotalRenderingCount { get; private set; }
 
+        // "Commit" is work done on UI thread by IAsyncCompletionCommitManager
         internal long CommitDuration { get; private set; }
 
+        // Additional parameters related to work done by IAsyncCompletionItemManager
         internal bool UserEverScrolled { get; private set; }
         internal bool UserEverSetFilters { get; private set; }
         internal int FinalItemCount { get; private set; }
         internal int NumberOfKeystrokes { get; private set; }
 
-        public CompletionSessionTelemetry(CompletionTelemetryHost telemetryHost, IAsyncCompletionItemManager completionService, ICompletionPresenterProvider presenterProvider)
+        public CompletionSessionTelemetry(CompletionTelemetryHost telemetryHost)
         {
             _telemetryHost = telemetryHost;
-            CompletionService = CompletionTelemetryHost.GetItemManagerName(completionService);
-            CompletionPresenterProvider = CompletionTelemetryHost.GetPresenterProviderName(presenterProvider);
         }
 
         internal void RecordProcessing(long processingTime, int itemCount)
@@ -75,9 +77,14 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             NumberOfKeystrokes++;
         }
 
-        internal void RecordCommitted(long commitDuration, IAsyncCompletionCommitManager manager)
+        internal void RecordCommittedSaveAndForget(long commitDuration,
+            IAsyncCompletionItemManager itemManager,
+            ICompletionPresenterProvider presenterProvider,
+            IAsyncCompletionCommitManager manager)
         {
-            CompletionSource = CompletionTelemetryHost.GetCommitManagerName(manager);
+            ItemManagerName = CompletionTelemetryHost.GetItemManagerName(itemManager);
+            PresenterProviderName = CompletionTelemetryHost.GetPresenterProviderName(presenterProvider);
+            CommitManagerName = CompletionTelemetryHost.GetCommitManagerName(manager);
             CommitDuration = commitDuration;
             _telemetryHost.Add(this);
         }
@@ -85,34 +92,50 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
     internal class CompletionTelemetryHost
     {
-        private class AggregateSourceData
+        private class AggregateCommitManagerData
         {
             internal long TotalCommitTime;
+
+            /// <summary>
+            /// This value is used to calculate averages
+            /// </summary>
             internal long CommitCount;
         }
 
-        private class AggregateServiceData
+        private class AggregateItemManagerData
         {
-            internal long TotalProcessTime;
             internal long InitialProcessTime;
+            internal long TotalProcessTime;
+
+            /// <summary>
+            /// This value is used to calculate average processing time. One session may have multiple processing operations.
+            /// </summary>
             internal int ProcessCount;
             internal int TotalKeystrokes;
             internal int UserEverScrolled;
             internal int UserEverSetFilters;
             internal int FinalItemCount;
+
+            /// <summary>
+            /// This value is used to calculate averages
+            /// </summary>
             internal int DataCount;
         }
 
         private class AggregatePresenterData
         {
-            internal long TotalRenderTime;
             internal long InitialRenderTime;
+            internal long TotalRenderTime;
+
+            /// <summary>
+            /// This value is used to calculate averages
+            /// </summary>
             internal int RenderCount;
         }
 
-        Dictionary<string, AggregateSourceData> SourceData = new Dictionary<string, AggregateSourceData>(4);
-        Dictionary<string, AggregateServiceData> ServiceData = new Dictionary<string, AggregateServiceData>(4);
-        Dictionary<string, AggregatePresenterData> PresenterData = new Dictionary<string, AggregatePresenterData>(4);
+        Dictionary<string, AggregateCommitManagerData> CommitManagerData = new Dictionary<string, AggregateCommitManagerData>(2);
+        Dictionary<string, AggregateItemManagerData> ItemManagerData = new Dictionary<string, AggregateItemManagerData>(8);
+        Dictionary<string, AggregatePresenterData> PresenterData = new Dictionary<string, AggregatePresenterData>(3);
 
         private readonly ILoggingServiceInternal _logger;
         private readonly AsyncCompletionBroker _broker;
@@ -124,8 +147,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         }
 
         internal static string GetSourceName(IAsyncCompletionSource source) => source?.GetType().ToString() ?? string.Empty;
-        internal static string GetCommitManagerName(IAsyncCompletionCommitManager manager) => manager?.GetType().ToString() ?? string.Empty;
-        internal static string GetItemManagerName(IAsyncCompletionItemManager service) => service?.GetType().ToString() ?? string.Empty;
+        internal static string GetCommitManagerName(IAsyncCompletionCommitManager commitManager) => commitManager?.GetType().ToString() ?? string.Empty;
+        internal static string GetItemManagerName(IAsyncCompletionItemManager itemManager) => itemManager?.GetType().ToString() ?? string.Empty;
         internal static string GetPresenterProviderName(ICompletionPresenterProvider provider) => provider?.GetType().ToString() ?? string.Empty;
 
         /// <summary>
@@ -137,37 +160,36 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             if (_logger == null)
                 return;
 
-            var presenterKey = telemetry.CompletionPresenterProvider;
+            var presenterKey = telemetry.PresenterProviderName;
             if (!PresenterData.ContainsKey(presenterKey))
                 PresenterData[presenterKey] = new AggregatePresenterData();
             var aggregatePresenterData = PresenterData[presenterKey];
 
-            var serviceKey = telemetry.CompletionService;
-            if (!ServiceData.ContainsKey(serviceKey))
-                ServiceData[serviceKey] = new AggregateServiceData();
-            var aggregateServiceData = ServiceData[serviceKey];
+            var itemManagerKey = telemetry.ItemManagerName;
+            if (!ItemManagerData.ContainsKey(itemManagerKey))
+                ItemManagerData[itemManagerKey] = new AggregateItemManagerData();
+            var aggregateItemManagerData = ItemManagerData[itemManagerKey];
 
-            var sourceKey = telemetry.CompletionSource;
-            if (!SourceData.ContainsKey(sourceKey))
-                SourceData[sourceKey] = new AggregateSourceData();
-            var aggregateSourceData = SourceData[sourceKey];
+            var commitKey = telemetry.CommitManagerName;
+            if (!CommitManagerData.ContainsKey(commitKey))
+                CommitManagerData[commitKey] = new AggregateCommitManagerData();
+            var aggregateCommitManagerData = CommitManagerData[commitKey];
 
             aggregatePresenterData.InitialRenderTime += telemetry.InitialRenderingDuration;
             aggregatePresenterData.TotalRenderTime += telemetry.TotalRenderingDuration;
             aggregatePresenterData.RenderCount += telemetry.TotalRenderingCount;
 
-            aggregateServiceData.DataCount++;
-            aggregateServiceData.FinalItemCount += telemetry.FinalItemCount;
-            aggregateServiceData.InitialProcessTime += telemetry.InitialProcessingDuration;
-            aggregateServiceData.ProcessCount += telemetry.TotalProcessingCount;
-            aggregateServiceData.TotalProcessTime += telemetry.TotalProcessingDuration;
-            aggregateServiceData.TotalKeystrokes += telemetry.NumberOfKeystrokes;
-            aggregateServiceData.TotalProcessTime += telemetry.TotalProcessingDuration;
-            aggregateServiceData.UserEverScrolled += telemetry.UserEverScrolled ? 1 : 0;
-            aggregateServiceData.UserEverSetFilters += telemetry.UserEverSetFilters ? 1 : 0;
+            aggregateItemManagerData.InitialProcessTime += telemetry.InitialProcessingDuration;
+            aggregateItemManagerData.TotalProcessTime += telemetry.TotalProcessingDuration;
+            aggregateItemManagerData.ProcessCount += telemetry.TotalProcessingCount;
+            aggregateItemManagerData.TotalKeystrokes += telemetry.NumberOfKeystrokes;
+            aggregateItemManagerData.UserEverScrolled += telemetry.UserEverScrolled ? 1 : 0;
+            aggregateItemManagerData.UserEverSetFilters += telemetry.UserEverSetFilters ? 1 : 0;
+            aggregateItemManagerData.FinalItemCount += telemetry.FinalItemCount;
+            aggregateItemManagerData.DataCount++;
 
-            aggregateSourceData.TotalCommitTime += telemetry.CommitDuration;
-            aggregateSourceData.CommitCount++;
+            aggregateCommitManagerData.TotalCommitTime += telemetry.CommitDuration;
+            aggregateCommitManagerData.CommitCount++;
         }
 
         /// <summary>
@@ -178,24 +200,16 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             if (_logger == null)
                 return;
 
-            foreach (var data in PresenterData)
-            {
-                if (data.Value.RenderCount == 0)
-                    continue;
-
-                _logger.PostEvent(PresenterEventName,
-                    (PresenterName, data.Key),
-                    (PresenterAverageInitialRendering, data.Value.InitialRenderTime / data.Value.RenderCount),
-                    (PresenterAverageRendering, data.Value.TotalRenderTime / data.Value.RenderCount)
-                );
-            }
-
-            foreach (var data in ServiceData)
+            foreach (var data in ItemManagerData)
             {
                 if (data.Value.DataCount == 0)
                     continue;
+                if (data.Value.ProcessCount == 0)
+                    continue;
 
-                _logger.PostEvent(ServiceEventName,
+                _logger.PostEvent(TelemetryEventType.Operation,
+                    ServiceEventName,
+                    TelemetryResult.Success,
                     (ServiceName, data.Key),
                     (ServiceAverageFinalItemCount, data.Value.FinalItemCount / data.Value.DataCount),
                     (ServiceAverageInitialProcessTime, data.Value.InitialProcessTime / data.Value.DataCount),
@@ -206,14 +220,30 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 );
             }
 
-            foreach (var data in SourceData)
+            foreach (var data in CommitManagerData)
             {
                 if (data.Value.CommitCount == 0)
                     continue;
 
-                _logger.PostEvent(SourceEventName,
-                    (SourceName, data.Key),
-                    (SourceAverageCommit, data.Value.TotalCommitTime / data.Value.CommitCount)
+                _logger.PostEvent(TelemetryEventType.Operation,
+                    CommitManagerEventName,
+                    TelemetryResult.Success,
+                    (CommitManagerName, data.Key),
+                    (CommitManagerAverageCommitDuration, data.Value.TotalCommitTime / data.Value.CommitCount)
+                );
+            }
+
+            foreach (var data in PresenterData)
+            {
+                if (data.Value.RenderCount == 0)
+                    continue;
+
+                _logger.PostEvent(TelemetryEventType.Operation,
+                    PresenterEventName,
+                    TelemetryResult.Success,
+                    (PresenterName, data.Key),
+                    (PresenterAverageInitialRendering, data.Value.InitialRenderTime / data.Value.RenderCount),
+                    (PresenterAverageRendering, data.Value.TotalRenderTime / data.Value.RenderCount)
                 );
             }
         }
@@ -226,15 +256,15 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         internal const string ServiceEventName = "VS/Editor/Completion/ServiceData";
         internal const string ServiceName = "Property.Service.Name";
-        internal const string ServiceAverageFinalItemCount = "Property.Service.Name";
-        internal const string ServiceAverageInitialProcessTime = "Property.Service.Name";
-        internal const string ServiceAverageFilterTime = "Property.Service.Name";
-        internal const string ServiceAverageKeystrokeCount = "Property.Service.Name";
-        internal const string ServiceAverageScrolled = "Property.Service.Name";
-        internal const string ServiceAverageSetFilters = "Property.Service.Name";
+        internal const string ServiceAverageFinalItemCount = "Property.Service.FinalItemCount";
+        internal const string ServiceAverageInitialProcessTime = "Property.Service.InitialDuration";
+        internal const string ServiceAverageFilterTime = "Property.Service.AnyDuration";
+        internal const string ServiceAverageKeystrokeCount = "Property.Service.KeystrokeCount";
+        internal const string ServiceAverageScrolled = "Property.Service.Scrolled";
+        internal const string ServiceAverageSetFilters = "Property.Service.SetFilters";
 
-        internal const string SourceEventName = "VS/Editor/Completion/SourceData";
-        internal const string SourceName = "Property.Commit.Name";
-        internal const string SourceAverageCommit = "Property.Commit.Duration";
+        internal const string CommitManagerEventName = "VS/Editor/Completion/SourceData";
+        internal const string CommitManagerName = "Property.CommitManager.Name";
+        internal const string CommitManagerAverageCommitDuration = "Property.Commit.Duration";
     }
 }
