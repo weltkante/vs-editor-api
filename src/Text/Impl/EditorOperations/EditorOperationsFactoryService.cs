@@ -46,7 +46,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         internal IEditorOptionsFactoryService EditorOptionsProvider { get; set; }
 
 #if WINDOWS
-        [Import(AllowDefault = true)]
+        [Import]
         internal IRtfBuilderService RtfBuilderService { get; set; }
 
 #endif
