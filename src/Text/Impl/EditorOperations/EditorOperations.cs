@@ -3392,11 +3392,6 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         private string GenerateRtf(NormalizedSnapshotSpanCollection spans)
         {
 #if WINDOWS
-            if (_factory.RtfBuilderService == null)
-            {
-                return null;
-            }
-
             //Don't generate RTF for large spans (since it is expensive and probably not wanted).
             int length = spans.Sum((span) => span.Length);
             if (length < _textView.Options.GetOptionValue(MaxRtfCopyLength.OptionKey))
