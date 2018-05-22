@@ -18,7 +18,7 @@ namespace Microsoft.VisualStudio.Text.BufferUndoManager.Implementation
 
         ITextBuffer _textBuffer;
         ITextUndoHistoryRegistry _undoHistoryRegistry;
-        ITextUndoHistory2 _undoHistory;
+        ITextUndoHistory _undoHistory;
         #endregion
 
         public TextBufferUndoManager(ITextBuffer textBuffer, ITextUndoHistoryRegistry undoHistoryRegistry)
@@ -49,61 +49,56 @@ namespace Microsoft.VisualStudio.Text.BufferUndoManager.Implementation
 
         private void TextBufferChanged(object sender, TextContentChangedEventArgs e)
         {
-            if (e.EditTag is IUndoEditTag)
+            if (!(e.EditTag is IUndoEditTag))
             {
-                Debug.Assert((_undoHistory.State != TextUndoHistoryState.Idle) || (e.EditTag is IBypassUndoEditTag),
-                             "Attemping an undo while not inside an undo transaction");
-            }
-            else if (_undoHistory.State == TextUndoHistoryState.Idle)
-            {
-                // With projection, we sometimes get Changed events with no changes, or for "" -> "".
-                // We don't want to create undo actions for these.
-                bool nonNullChange = false;
-                foreach (ITextChange c in e.BeforeVersion.Changes)
+                if (this.TextBufferUndoHistory.State != TextUndoHistoryState.Idle)
                 {
-                    if (c.OldLength != 0 || c.NewLength != 0)
+                    Debug.Fail("We are doing a normal edit in a non-idle undo state. This is explicitly prohibited as it would corrupt the undo stack!  Please fix your code.");
+                }
+                else
+                {
+                    // With projection, we sometimes get Changed events with no changes, or for "" -> "".
+                    // We don't want to create undo actions for these.
+                    bool nonNullChange = false;
+                    foreach (ITextChange c in e.BeforeVersion.Changes)
                     {
-                        nonNullChange = true;
-                        break;
+                        if (c.OldLength != 0 || c.NewLength != 0)
+                        {
+                            nonNullChange = true;
+                            break;
+                        }
+                    }
+
+                    if (nonNullChange)
+                    {
+                        // TODO remove this
+                        // Hack to allow Cascade's local undo to light up if using v15.7 but behave using the old -- non-local -- undo before if running on 15.6.
+                        // Cascade should really be marking its edits with IInvisibleEditTag (and will once it can take a hard requirement of VS 15.7).
+
+                        using (ITextUndoTransaction undoTransaction = ((e.EditTag is IInvisibleEditTag) || ((e.EditTag != null) && (string.Equals(e.EditTag.ToString(), "CascadeRemoteEdit", StringComparison.Ordinal))))
+                                                                      ? ((ITextUndoHistory2)_undoHistory).CreateInvisibleTransaction("<invisible>")      // This string does not need to be localized (it should never be seen by the end user).
+                                                                      : _undoHistory.CreateTransaction(Strings.TextBufferChanged))
+                        {
+                            TextBufferChangeUndoPrimitive undoPrimitive = new TextBufferChangeUndoPrimitive(_undoHistory, e.BeforeVersion);
+                            undoTransaction.AddUndo(undoPrimitive);
+
+                            undoTransaction.Complete();
+                        }
                     }
                 }
-
-                if (nonNullChange)
-                {
-
-                    // TODO remove this
-                    // Hack to allow Cascade's local undo to light up if using v15.7 but behave using the old -- non-local -- undo before if running on 15.6.
-                    // Cascade should really be marking its edits with IInvisibleEditTag (and will once it can take a hard requirement of VS 15.7).
-
-                    using (ITextUndoTransaction undoTransaction = ((e.EditTag is IInvisibleEditTag) || ((e.EditTag != null) && (e.EditTag.ToString() == "CascadeRemoteEdit")))
-                                                                  ? _undoHistory.CreateInvisibleTransaction("<invisible>")      // This string does not need to be localized (it should never be seen by the end user).
-                                                                  : _undoHistory.CreateTransaction(Strings.TextBufferChanged))
-                    {
-                        TextBufferChangeUndoPrimitive undoPrimitive = new TextBufferChangeUndoPrimitive(_undoHistory, e.BeforeVersion);
-                        undoTransaction.AddUndo(undoPrimitive);
-
-                        undoTransaction.Complete();
-                    }
-                }
-            }
-            else
-            {
-                Debug.Fail("Attempting a normal edit while inside an undo transaction");
             }
         }
 
         void TextBufferChanging(object sender, TextContentChangingEventArgs e)
         {
-            if (!(e.EditTag is IBypassUndoEditTag))
+            // Note that VB explicitly forces undo edits to happen while the history is idle so we need to allow this here
+            // by always doing nothing for undo edits). This may be a bug in our code (e.g. not properly cleaning up when
+            // an undo transaction is cancelled in mid-flight) but changing that will require coordination with Roslyn.
+            if (!(e.EditTag is IUndoEditTag))
             {
-                this.EnsureTextBufferUndoHistory();
-
-                if ((_undoHistory.State == TextUndoHistoryState.Idle) == (e.EditTag is IUndoEditTag))
+                if (this.TextBufferUndoHistory.State != TextUndoHistoryState.Idle)
                 {
-                    Debug.Fail((e.EditTag is IUndoEditTag)
-                               ? "Attemping an undo while not inside an undo transaction"
-                               : "Attempting a normal edit while inside an undo transaction");
-
+                    Debug.Fail("We are doing a normal edit in a non-idle undo state. This is explicitly prohibited as it would corrupt the undo stack!  Please fix your code.");
                     e.Cancel();
                 }
             }
@@ -149,7 +144,7 @@ namespace Microsoft.VisualStudio.Text.BufferUndoManager.Implementation
             // has been unregistered (ie it can be unregistered by a third party)
             // An issue has been logged with the Undo team, but in the mean time, to ensure that
             // we are robust, always register the undo history.
-            _undoHistory = (ITextUndoHistory2)(_undoHistoryRegistry.RegisterHistory(_textBuffer));
+            _undoHistory = _undoHistoryRegistry.RegisterHistory(_textBuffer);
         }
 
         #region IDisposable Members

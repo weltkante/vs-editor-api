@@ -267,4 +267,7 @@
   <data name="DuplicateSelectionCommandHandlerName" xml:space="preserve">
     <value>Duplicate Selection Command Handler</value>
   </data>
+  <data name="NextIssue" xml:space="preserve">
+    <value>Next/Previous Issue</value>
+  </data>
 </root>

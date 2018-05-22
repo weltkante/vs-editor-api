@@ -136,8 +136,10 @@ namespace Microsoft.VisualStudio.UI.Text.Commanding.Implementation
             }
         }
 
-        private void ExecuteCommandHandlerChain(CommandExecutionContext commandExecutionContext,
-            Action handlerChain, Action nextCommandHandler)
+        private static void ExecuteCommandHandlerChain(
+            CommandExecutionContext commandExecutionContext,
+            Action handlerChain,
+            Action nextCommandHandler)
         {
             try
             {

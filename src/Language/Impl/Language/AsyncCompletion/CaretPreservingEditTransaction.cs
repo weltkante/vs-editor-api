@@ -74,6 +74,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             EndTransaction();
         }
 
+#pragma warning disable CA1063 // Dispose pattern
         public void Dispose()
         {
             if (_transaction != null)
@@ -82,6 +83,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 Cancel();
             }
         }
+#pragma warning restore CA1063
 
         public IMergeTextUndoTransactionPolicy MergePolicy
         {

@@ -4,6 +4,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.Text.Projection;
 using Microsoft.VisualStudio.Utilities;
 
 namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
@@ -18,12 +19,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// Each instance of T appears only once in the returned collection.
         /// Must be invoked on UI thread.
         /// </summary>
-        /// <param name="textView"></param>
-        /// <param name="originalPoint"></param>
-        /// <param name="imports"></param>
-        /// <returns></returns>
         internal static IEnumerable<(ITextBuffer buffer, SnapshotPoint point, Lazy<T, TMetadata> import)> GetOrderedBuffersAndImports(
-            ITextView textView,
+            IBufferGraph bufferGraph,
+            ITextViewRoleSet roles,
             SnapshotPoint location,
             Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<T, TMetadata>>> getImports,
             IComparer<IEnumerable<string>> contentTypeComparer)
@@ -56,7 +54,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             //    list of (buffer, handler) pairs: (projection buffer, projection handler), (C# buffer, C# handler),
             //    (projection buffer, any handler).
 
-            var mappedPointsEnumeration = GetPointsOnAvailableBuffers(textView, location);
+            var mappedPointsEnumeration = GetPointsOnAvailableBuffers(bufferGraph, location);
             if (!mappedPointsEnumeration.Any())
                 yield break;
 
@@ -68,7 +66,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             var importBuckets = new ImportBucket<T, TMetadata>[buffers.Length];
             for (int i = 0; i < buffers.Length; i++)
             {
-                importBuckets[i] = new ImportBucket<T, TMetadata>(getImports(buffers[i].ContentType, textView.Roles));
+                importBuckets[i] = new ImportBucket<T, TMetadata>(getImports(buffers[i].ContentType, roles));
             }
 
             while (true)
@@ -126,17 +124,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// A simpler method that returns all imports with declared content type that matches content type of subject buffers available at the given location.
         /// Must be invoked on UI thread.
         /// </summary>
-        /// <param name="textView"></param>
-        /// <param name="location"></param>
-        /// <param name="getImports"></param>
-        /// <param name="contentTypeComparer"></param>
-        /// <returns></returns>
         internal static IEnumerable<(ITextBuffer buffer, SnapshotPoint point, Lazy<T, TMetadata> import)> GetBuffersAndImports(
-            ITextView textView,
+            IBufferGraph bufferGraph,
+            ITextViewRoleSet roles,
             SnapshotPoint location,
             Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<T, TMetadata>>> getImports)
         {
-            var mappedPointsEnumeration = GetPointsOnAvailableBuffers(textView, location);
+            var mappedPointsEnumeration = GetPointsOnAvailableBuffers(bufferGraph, location);
             if (!mappedPointsEnumeration.Any())
                 yield break;
 
@@ -147,7 +141,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             // ordered by [Order] and content type specificity
             for (int i = 0; i < buffers.Length; i++)
             {
-                foreach (var import in getImports(buffers[i].ContentType, textView.Roles))
+                foreach (var import in getImports(buffers[i].ContentType, roles))
                     yield return (buffers[i], mappedPoints[i], import);
             }
         }
@@ -156,10 +150,10 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// Maps given <see cref="SnapshotPoint"/> to <see cref="SnapshotPoint"/>s on buffers available at this location.
         /// Must be invoked on UI thread.
         /// </summary>
-        private static IEnumerable<SnapshotPoint> GetPointsOnAvailableBuffers(ITextView textView, SnapshotPoint location)
+        private static IEnumerable<SnapshotPoint> GetPointsOnAvailableBuffers(IBufferGraph bufferGraph, SnapshotPoint location)
         {
-            var mappingPoint = textView.BufferGraph.CreateMappingPoint(location, PointTrackingMode.Negative);
-            var buffers = textView.BufferGraph.GetTextBuffers(b => mappingPoint.GetPoint(b, PositionAffinity.Predecessor) != null);
+            var mappingPoint = bufferGraph.CreateMappingPoint(location, PointTrackingMode.Negative);
+            var buffers = bufferGraph.GetTextBuffers(b => mappingPoint.GetPoint(b, PositionAffinity.Predecessor) != null);
             var pointsInBuffers = buffers.Select(b => mappingPoint.GetPoint(b, PositionAffinity.Predecessor).Value);
             return pointsInBuffers;
         }

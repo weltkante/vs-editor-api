@@ -20,7 +20,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// <summary>
         /// Name of the completion's <see cref="ICommandHandler"/>. Use to order your MEF part.
         /// </summary>
-        public const string CompletionCommandHandlers = "CompletionCommandHandlers";
+        public const string CompletionCommandHandler = "CompletionCommandHandler";
 
         /// <summary>
         /// Name of the editor option that stores user's preference for the completion mode.

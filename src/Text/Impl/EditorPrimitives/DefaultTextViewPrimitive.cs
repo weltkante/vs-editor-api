@@ -10,6 +10,7 @@ namespace Microsoft.VisualStudio.Text.EditorPrimitives.Implementation
     using Microsoft.VisualStudio.Text;
     using Microsoft.VisualStudio.Text.Editor;
     using Microsoft.VisualStudio.Text.Formatting;
+    using Selection = Microsoft.VisualStudio.Text.Editor.Selection;
 
     internal sealed class DefaultTextViewPrimitive : TextView
     {

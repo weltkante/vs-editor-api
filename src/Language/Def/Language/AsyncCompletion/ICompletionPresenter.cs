@@ -1,4 +1,5 @@
 ﻿using System;
+using Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Data;
 
 namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
 {
@@ -14,13 +15,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// <summary>
         /// Opens the UI and displays provided data
         /// </summary>
-        /// <param name="presentation"></param>
+        /// <param name="presentation">Data to display in the UI</param>
         void Open(CompletionPresentationViewModel presentation);
 
         /// <summary>
-        /// Displays provided data on the UI
+        /// Updates the UI with provided data
         /// </summary>
-        /// <param name="presentation"></param>
+        /// <param name="presentation">Data to display in the UI</param>
         void Update(CompletionPresentationViewModel presentation);
 
         /// <summary>

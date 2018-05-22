@@ -1,4 +1,4 @@
-﻿namespace Microsoft.VisualStudio.Utilities.Features
+﻿namespace Microsoft.VisualStudio.Utilities
 {
     /// <summary>
     /// Contains definitions for known <see cref="FeatureDefinition"/>s and their groupings.

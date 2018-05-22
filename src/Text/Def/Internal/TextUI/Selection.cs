@@ -9,10 +9,12 @@ namespace Microsoft.VisualStudio.Text.Editor
 {
     using System;
 
+#pragma warning disable CA1710 // Identifiers should have correct suffix
     /// <summary>
     /// Represents the selection on the screen.
     /// </summary>
     public abstract class Selection : DisplayTextRange
+#pragma warning restore CA1710 // Identifiers should have correct suffix
     {
         /// <summary>
         /// When implemented in a derived class, selects the given text range.

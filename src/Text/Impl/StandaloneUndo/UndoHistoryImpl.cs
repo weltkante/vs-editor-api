@@ -249,12 +249,12 @@ namespace Microsoft.VisualStudio.Text.Operations.Standalone
         {
             if (count <= 0)
             {
-                throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, "Strings.RedoAndUndoAcceptOnlyPositiveCounts", "Undo", count), nameof(count));
+                throw new ArgumentOutOfRangeException(nameof(count));
             }
 
             if (!IsThereEnoughVisibleTransactions(this.undoStack, count))
             {
-                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, "Strings.CannotUndoMoreTransactionsThanExist", "undo", count));
+                throw new InvalidOperationException("Cannot undo more transactions than exist");
             }
 
             TextUndoHistoryState originalState = this.state;
@@ -326,12 +326,12 @@ namespace Microsoft.VisualStudio.Text.Operations.Standalone
         {
             if (count <= 0)
             {
-                throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, "Strings.RedoAndUndoAcceptOnlyPositiveCounts", "Redo", count), nameof(count));
+                throw new ArgumentOutOfRangeException(nameof(count));
             }
 
             if (!IsThereEnoughVisibleTransactions(this.redoStack, count))
             {
-                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, "Strings.CannotUndoMoreTransactionsThanExist", "redo", count));
+                throw new InvalidOperationException("Cannot redo more transactions than exist");
             }
 
             TextUndoHistoryState originalState = this.state;

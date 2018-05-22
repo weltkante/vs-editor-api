@@ -5,9 +5,11 @@ using System.ComponentModel.Composition;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Data;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Text.Operations;
+using Microsoft.VisualStudio.Text.Projection;
 using Microsoft.VisualStudio.Text.Utilities;
 using Microsoft.VisualStudio.Threading;
 using Microsoft.VisualStudio.Utilities;
@@ -15,12 +17,12 @@ using Microsoft.VisualStudio.Utilities;
 namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
     [Export(typeof(IAsyncCompletionBroker))]
-    internal class AsyncCompletionBroker : IAsyncCompletionBroker
+    internal sealed class AsyncCompletionBroker : IAsyncCompletionBroker
     {
         [Import]
         private IGuardedOperations GuardedOperations;
 
-        [Import(AllowDefault = true)]
+        [Import]
         private JoinableTaskContext JoinableTaskContext;
 
         [Import]
@@ -65,21 +67,20 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         private bool firstRun = true; // used only for diagnostics
         private bool _firstInvocationReported; // used for "time to code"
         private StableContentTypeComparer _contentTypeComparer;
-
-        private const string IsCompletionAvailableProperty = "IsCompletionAvailable";
         private Dictionary<IContentType, bool> FeatureAvailabilityByContentType = new Dictionary<IContentType, bool>();
 
         public event EventHandler<CompletionTriggeredEventArgs> CompletionTriggered;
 
-        bool IAsyncCompletionBroker.IsCompletionActive(ITextView textView)
+        #region IAsyncCompletionBroker implementation
+
+        public bool IsCompletionActive(ITextView textView)
         {
             return textView.Properties.ContainsProperty(typeof(IAsyncCompletionSession));
         }
 
-        bool IAsyncCompletionBroker.IsCompletionSupported(IContentType contentType)
+        public bool IsCompletionSupported(IContentType contentType)
         {
-            bool featureIsAvailable;
-            if (FeatureAvailabilityByContentType.TryGetValue(contentType, out featureIsAvailable))
+            if (FeatureAvailabilityByContentType.TryGetValue(contentType, out bool featureIsAvailable))
             {
                 return featureIsAvailable;
             }
@@ -93,7 +94,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             return featureIsAvailable;
         }
 
-        IAsyncCompletionSession IAsyncCompletionBroker.GetSession(ITextView textView)
+        public IAsyncCompletionSession GetSession(ITextView textView)
         {
             if (textView.Properties.TryGetProperty(typeof(IAsyncCompletionSession), out IAsyncCompletionSession session))
             {
@@ -102,9 +103,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             return null;
         }
 
-        IAsyncCompletionSession IAsyncCompletionBroker.TriggerCompletion(ITextView textView, SnapshotPoint triggerLocation, char typedChar)
+        public IAsyncCompletionSession TriggerCompletion(ITextView textView, SnapshotPoint triggerLocation, char typedChar, CancellationToken token)
         {
-            var session = ((IAsyncCompletionBroker)this).GetSession(textView);
+            var session = GetSession(textView);
             if (session != null)
             {
                 return session;
@@ -113,18 +114,77 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             if (!JoinableTaskContext.IsOnMainThread)
                 throw new InvalidOperationException($"This method must be callled on the UI thread.");
 
-            var sourcesWithData = MetadataUtilities<IAsyncCompletionSourceProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetBuffersAndImports(textView, triggerLocation, GetItemSourceProviders);
-            var commitManagersWithData = MetadataUtilities<IAsyncCompletionCommitManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetBuffersAndImports(textView, triggerLocation, GetCommitManagerProviders);
+            var telemetryHost = GetOrCreateTelemetry(textView);
+            var telemetry = new CompletionSessionTelemetry(telemetryHost);
 
-            // Obtain potential commit characters
+            GetCommitManagersAndChars(textView.BufferGraph, textView.Roles, textView, triggerLocation, GetCommitManagerProviders, telemetry,
+                out var managersWithBuffers, out var potentialCommitChars);
+
+            GetCompletionSources(textView.TextBuffer, textView.Roles, textView, textView.BufferGraph, triggerLocation, GetItemSourceProviders, telemetry, typedChar, token,
+                out var sourcesWithLocations, out var applicableToSpan);
+
+            // No source declared an appropriate ApplicableToSpan
+            if (applicableToSpan == default)
+                return null;
+             
+            if (_contentTypeComparer == null)
+                _contentTypeComparer = new StableContentTypeComparer(ContentTypeRegistryService);
+
+            var itemManager = GetItemManager(textView.BufferGraph, textView.Roles, textView, triggerLocation, GetItemManagerProviders, _contentTypeComparer);
+            var presenterProvider = GetPresenterProvider(textView.BufferGraph, textView.Roles, triggerLocation, GetPresenters, _contentTypeComparer);
+
+            session = new AsyncCompletionSession(applicableToSpan, potentialCommitChars, JoinableTaskContext, presenterProvider, sourcesWithLocations, managersWithBuffers, itemManager, this, textView, telemetry, GuardedOperations);
+            textView.Properties.AddProperty(typeof(IAsyncCompletionSession), session);
+
+            textView.Closed += TextView_Closed;
+            EmulateLegacyCompletionTelemetry(textView);
+            GuardedOperations.RaiseEvent(this, CompletionTriggered, new CompletionTriggeredEventArgs(session, textView));
+
+            return session;
+        }
+
+        #endregion
+
+        #region Internal communication with AsyncCompletionSession
+
+        /// <summary>
+        /// This method is used by <see cref="IAsyncCompletionSession"/> to inform the broker that it should forget about the session.
+        /// Invoked as a result of dismissing. This method does not dismiss the session!
+        /// </summary>
+        /// <param name="session">Session being dismissed</param>
+#pragma warning disable CA1822 // Member does not access instance data and can be marked as static
+        internal void ForgetSession(IAsyncCompletionSession session)
+        {
+            session.TextView.Properties.RemoveProperty(typeof(IAsyncCompletionSession));
+        }
+#pragma warning restore CA1822
+
+        #endregion
+
+        #region MEF part helper methods
+
+        private void GetCommitManagersAndChars(
+            IBufferGraph bufferGraph,
+            ITextViewRoleSet roles,
+            ITextView textViewForGetOrCreate, /* This name conveys that we're using ITextView only to init the MEF part. this is subject to change. */
+            SnapshotPoint triggerLocation,
+            Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<IAsyncCompletionCommitManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>>> getImports,
+            CompletionSessionTelemetry telemetry,
+            out IList<(IAsyncCompletionCommitManager, ITextBuffer)> managersWithBuffers,
+            out ImmutableArray<char> potentialCommitChars)
+        {
+            var commitManagersWithData = MetadataUtilities<IAsyncCompletionCommitManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>
+                .GetBuffersAndImports(bufferGraph, roles, triggerLocation, getImports);
+
             var potentialCommitCharsBuilder = ImmutableArray.CreateBuilder<char>();
-            var managersWithBuffers = new List<(IAsyncCompletionCommitManager, ITextBuffer)>(1);
-            foreach (var managerWithData in commitManagersWithData)
+            managersWithBuffers = new List<(IAsyncCompletionCommitManager, ITextBuffer)>(1);
+            foreach (var (buffer, point, import) in commitManagersWithData)
             {
-                var managerProvider = GuardedOperations.InstantiateExtension(this, managerWithData.import);
+                telemetry.UiStopwatch.Restart();
+                var managerProvider = GuardedOperations.InstantiateExtension(this, import);
                 var manager = GuardedOperations.CallExtensionPoint(
                     errorSource: managerProvider,
-                    call: () => managerProvider.GetOrCreate(textView),
+                    call: () => managerProvider.GetOrCreate(textViewForGetOrCreate),
                     valueOnThrow: null);
 
                 if (manager == null)
@@ -137,60 +197,107 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                         var characters = manager.PotentialCommitCharacters;
                         potentialCommitCharsBuilder.AddRange(characters);
                     });
-                managersWithBuffers.Add((manager, managerWithData.buffer));
-            }
+                managersWithBuffers.Add((manager, buffer));
+                telemetry.UiStopwatch.Stop();
+                telemetry.RecordObtainingCommitManagerData(manager, telemetry.UiStopwatch.ElapsedMilliseconds);
 
-            // Obtain applicable span, potential commit chars and mapping of source to buffer
-            SnapshotSpan applicableSpan = default(SnapshotSpan);
-            bool applicableSpanExists = false;
-            var sourcesWithLocations = new List<(IAsyncCompletionSource, SnapshotPoint)>(); // TODO: optimize this.
-            foreach (var sourceWithData in sourcesWithData)
+                potentialCommitChars = potentialCommitCharsBuilder.ToImmutable();
+            }
+        }
+
+        private void GetCompletionSources(
+            ITextBuffer editBuffer,
+            ITextViewRoleSet roles,
+            ITextView textViewForGetOrCreate, /* This name conveys that we're using ITextView only to init the MEF part. this is subject to change. */
+            IBufferGraph bufferGraph,
+            SnapshotPoint triggerLocation,
+            Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<IAsyncCompletionSourceProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>>> getImports,
+            CompletionSessionTelemetry telemetry,
+            char typedChar,
+            CancellationToken token,
+            out IList<(IAsyncCompletionSource, SnapshotPoint)> sourcesWithLocations,
+            out SnapshotSpan applicableToSpan)
+        {
+            var sourcesWithData = MetadataUtilities<IAsyncCompletionSourceProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>
+                .GetBuffersAndImports(bufferGraph, roles, triggerLocation, getImports);
+
+            var applicableToSpanBuilder = default(SnapshotSpan);
+            bool applicableToSpanExists = false;
+            var sourcesWithLocationsBuider = new List<(IAsyncCompletionSource, SnapshotPoint)>(sourcesWithData.Count());
+
+            foreach (var (buffer, point, import) in sourcesWithData)
             {
-                var sourceProvider = GuardedOperations.InstantiateExtension(this, sourceWithData.import);
+                telemetry.UiStopwatch.Restart();
+
+                var sourceProvider = GuardedOperations.InstantiateExtension(this, import);
                 var source = GuardedOperations.CallExtensionPoint(
                     errorSource: sourceProvider,
-                    call: () => sourceProvider.GetOrCreate(textView),
+                    call: () => sourceProvider.GetOrCreate(textViewForGetOrCreate),
                     valueOnThrow: null);
 
                 if (source == null)
                     continue;
 
-                applicableSpanExists |= GuardedOperations.CallExtensionPoint(
+                applicableToSpanExists |= GuardedOperations.CallExtensionPoint(
                     errorSource: source,
                     call: () =>
                     {
-                        sourcesWithLocations.Add((source, sourceWithData.point)); // We want to iterate through all sources
-                        if (!applicableSpanExists) // Call this only once.
-                            return source.TryGetApplicableSpan(typedChar, sourceWithData.point, out applicableSpan);
-                        return false;
+                        // We want to iterate through all sources and add them to collection
+                        sourcesWithLocationsBuider.Add((source, point));
+                        // Get the span only if we haven't received one yet
+                        if (!applicableToSpanExists)
+                            return source.TryGetApplicableToSpan(typedChar, point, out applicableToSpanBuilder, token);
+                        else
+                            return false; // applicableSpanExists is already true, so it doesn't matter what we return here
                     },
                     valueOnThrow: false);
 
-                // Assume that sources are ordered. If this source is the first one to provide span, map it to the view's top buffer and use it for completion,
-                if (applicableSpanExists)
-                {
-                    var mappingSpan = textView.BufferGraph.CreateMappingSpan(applicableSpan, SpanTrackingMode.EdgeInclusive);
-                    applicableSpan = mappingSpan.GetSpans(textView.TextBuffer)[0];
-                    break; // We have the span, there is no need to call any more sources.
-                }
+                telemetry.UiStopwatch.Stop();
+                telemetry.RecordObtainingSourceSpan(source, telemetry.UiStopwatch.ElapsedMilliseconds);
             }
 
-            if (!applicableSpanExists)
-                return null;
+            // Assume that sources are ordered. If this source is the first one to provide span, map it to the view's edit buffer and use it for completion,
+            if (applicableToSpanExists)
+            {
+                var mappingSpan = bufferGraph.CreateMappingSpan(applicableToSpanBuilder, SpanTrackingMode.EdgeInclusive);
+                applicableToSpanBuilder = mappingSpan.GetSpans(editBuffer)[0];
+            }
 
-            if (_contentTypeComparer == null)
-                _contentTypeComparer = new StableContentTypeComparer(ContentTypeRegistryService);
+            // Copying temporary values because we can't access out&ref params in lambdas
+            sourcesWithLocations = sourcesWithLocationsBuider;
+            applicableToSpan = applicableToSpanBuilder;
+        }
 
-            var itemManagerProvidersWithData = MetadataUtilities<IAsyncCompletionItemManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetOrderedBuffersAndImports(textView, triggerLocation, GetItemManagerProviders, _contentTypeComparer);
+        private IAsyncCompletionItemManager GetItemManager(
+            IBufferGraph bufferGraph,
+            ITextViewRoleSet textViewRoles,
+            ITextView textViewForGetOrCreate, /* This name conveys that we're using ITextView only to init the MEF part. this is subject to change. */
+            SnapshotPoint triggerLocation,
+            Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<IAsyncCompletionItemManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>>> getImports,
+            StableContentTypeComparer contentTypeComparer
+            )
+        {
+            var itemManagerProvidersWithData = MetadataUtilities<IAsyncCompletionItemManagerProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>
+                .GetOrderedBuffersAndImports(bufferGraph, textViewRoles, triggerLocation, getImports, contentTypeComparer);
             if (!itemManagerProvidersWithData.Any())
             {
                 // This should never happen because we provide a default and IsCompletionFeatureAvailable would have returned false 
                 throw new InvalidOperationException("No completion services not found. Completion will be unavailable.");
             }
-            var bestItemManagerProvider = GuardedOperations.InstantiateExtension(this, itemManagerProvidersWithData.First().import);
-            var itemManager = GuardedOperations.CallExtensionPoint(bestItemManagerProvider, () => bestItemManagerProvider.GetOrCreate(textView), null);
 
-            var presenterProvidersWithData = MetadataUtilities<ICompletionPresenterProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>.GetOrderedBuffersAndImports(textView, triggerLocation, GetPresenters, _contentTypeComparer);
+            var bestItemManagerProvider = GuardedOperations.InstantiateExtension(this, itemManagerProvidersWithData.First().import);
+            return GuardedOperations.CallExtensionPoint(bestItemManagerProvider, () => bestItemManagerProvider.GetOrCreate(textViewForGetOrCreate), null);
+        }
+
+        private ICompletionPresenterProvider GetPresenterProvider(
+            IBufferGraph bufferGraph,
+            ITextViewRoleSet textViewRoles,
+            SnapshotPoint triggerLocation,
+            Func<IContentType, ITextViewRoleSet, IReadOnlyList<Lazy<ICompletionPresenterProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>>> getImports,
+            StableContentTypeComparer contentTypeComparer)
+        {
+            var presenterProvidersWithData = MetadataUtilities<ICompletionPresenterProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>
+                .GetOrderedBuffersAndImports(bufferGraph, textViewRoles, triggerLocation, getImports, contentTypeComparer);
             ICompletionPresenterProvider presenterProvider = null;
             if (presenterProvidersWithData.Any())
                 presenterProvider = GuardedOperations.InstantiateExtension(this, presenterProvidersWithData.First().import);
@@ -200,28 +307,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 System.Diagnostics.Debug.Assert(presenterProvider != null, $"No instance of {nameof(ICompletionPresenterProvider)} is loaded. Completion will work without the UI.");
                 firstRun = false;
             }
-            var telemetry = GetOrCreateTelemetry(textView);
 
-            session = new AsyncCompletionSession(applicableSpan, potentialCommitCharsBuilder.ToImmutable(), JoinableTaskContext, presenterProvider, sourcesWithLocations, managersWithBuffers, itemManager, this, textView, telemetry, GuardedOperations);
-            textView.Properties.AddProperty(typeof(IAsyncCompletionSession), session);
-            textView.Closed += TextView_Closed;
-
-            // Additionally, emulate the legacy completion telemetry
-            EmulateLegacyCompletionTelemetry(itemManagerProvidersWithData.First().buffer?.ContentType, textView);
-
-            GuardedOperations.RaiseEvent(this, CompletionTriggered, new CompletionTriggeredEventArgs(session, textView));
-
-            return session;
-        }
-
-        /// <summary>
-        /// This method is used by <see cref="IAsyncCompletionSession"/> to inform the broker that it should forget about the session.
-        /// Invoked as a result of dismissing. This method does not dismiss the session!
-        /// </summary>
-        /// <param name="session">Session being dismissed</param>
-        internal void ForgetSession(IAsyncCompletionSession session)
-        {
-            session.TextView.Properties.RemoveProperty(typeof(IAsyncCompletionSession));
+            return presenterProvider;
         }
 
         private IReadOnlyList<Lazy<IAsyncCompletionSourceProvider, IOrderableContentTypeAndOptionalTextViewRoleMetadata>> GetItemSourceProviders(IContentType contentType, ITextViewRoleSet textViewRoles)
@@ -244,22 +331,9 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             return OrderedPresenterProviders.Where(n => n.Metadata.ContentTypes.Any(c => contentType.IsOfType(c)) && (n.Metadata.TextViewRoles == null || textViewRoles.ContainsAny(n.Metadata.TextViewRoles))).OrderBy(n => n.Metadata.ContentTypes, _contentTypeComparer).ToList();
         }
 
-        private void TextView_Closed(object sender, EventArgs e)
-        {
-            var view = (ITextView)sender;
-            view.Closed -= TextView_Closed;
-            ((IAsyncCompletionBroker)this).GetSession(view)?.Dismiss();
-            try
-            {
-                SendTelemetry(view);
-            }
-            catch (Exception ex)
-            {
-                GuardedOperations.HandleException(this, ex);
-            }
-        }
+        #endregion
 
-        // Helper methods for telemetry:
+        #region Telemetry
 
         private CompletionTelemetryHost GetOrCreateTelemetry(ITextView textView)
         {
@@ -275,7 +349,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             }
         }
 
-        private void SendTelemetry(ITextView textView)
+#pragma warning disable CA1822 // Member does not access instance data and can be marked as static
+        private static void SendTelemetry(ITextView textView)
         {
             if (textView.Properties.TryGetProperty(typeof(CompletionTelemetryHost), out CompletionTelemetryHost telemetry))
             {
@@ -283,9 +358,10 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 textView.Properties.RemoveProperty(typeof(CompletionTelemetryHost));
             }
         }
+#pragma warning restore CA1822
 
         // Parity with legacy telemetry
-        private void EmulateLegacyCompletionTelemetry(IContentType contentType, ITextView textView)
+        private void EmulateLegacyCompletionTelemetry(ITextView textView)
         {
             if (Logger == null || _firstInvocationReported)
                 return;
@@ -295,8 +371,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 var documentFactoryService = TextDocumentFactoryService;
                 if (buffer != null && documentFactoryService != null)
                 {
-                    ITextDocument currentDocument = null;
-                    documentFactoryService.TryGetTextDocument(buffer, out currentDocument);
+                    documentFactoryService.TryGetTextDocument(buffer, out ITextDocument currentDocument);
                     if (currentDocument != null && currentDocument.FilePath != null)
                     {
                         return System.IO.Path.GetExtension(currentDocument.FilePath);
@@ -305,12 +380,30 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 return null;
             }
             var fileExtension = GetFileExtension(textView.TextBuffer) ?? "Unknown";
-            var reportedContentType = contentType?.ToString() ?? "Unknown";
+            var reportedContentType = textView.TextBuffer.ContentType?.ToString() ?? "Unknown";
 
             _firstInvocationReported = true;
             Logger.PostEvent(TelemetryEventType.Operation, "VS/Editor/IntellisenseFirstRun/Opened", TelemetryResult.Success,
                 ("VS.Editor.IntellisenseFirstRun.Opened.ContentType", reportedContentType),
                 ("VS.Editor.IntellisenseFirstRun.Opened.FileExtension", fileExtension));
         }
+
+        #endregion
+
+        private void TextView_Closed(object sender, EventArgs e)
+        {
+            var view = (ITextView)sender;
+            view.Closed -= TextView_Closed;
+            GetSession(view)?.Dismiss();
+            try
+            {
+                SendTelemetry(view);
+            }
+            catch (Exception ex)
+            {
+                GuardedOperations.HandleException(this, ex);
+            }
+        }
+
     }
 }

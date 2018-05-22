@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Microsoft.VisualStudio.Utilities.Features
+namespace Microsoft.VisualStudio.Utilities
 {
     /// <summary>
     /// Keeps track of requests to disable a feature using <see cref="IFeatureService"/>.

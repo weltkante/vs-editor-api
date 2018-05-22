@@ -1,7 +1,7 @@
-﻿using System.Collections.Generic;
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Data;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 
@@ -20,47 +20,33 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion
         /// <summary>
         /// This method is first called before completion is about to appear,
         /// and then on subsequent typing events and when user toggles completion filters.
-        /// user's input tracked with <see cref="ITrackingSpan"/> on given <see cref="ITextSnapshot"/>
-        /// and a collection of <see cref="CompletionFilterWithState"/>s that indicate user's filter selection.
+        /// <paramref name="session"/> tracks user user's input tracked with <see cref="IAsyncCompletionSession.ApplicableToSpan"/>.
+        /// <paramref name="data"/> provides applicable <see cref="AsyncCompletionSessionDataSnapshot.Snapshot"/> and 
+        /// and <see cref="AsyncCompletionSessionDataSnapshot.SelectedFilters"/>s that indicate user's filter selection.
         /// </summary>
-        /// <param name="sortedList">Set of <see cref="CompletionItem"/>s to filter and sort, originally returned from <see cref="SortCompletionListAsync"/></param>
-        /// <param name="triggerReason">The <see cref="CompletionTriggerReason"/> completion was initially triggered.</param>
-        /// <param name="filterReason">The <see cref="CompletionFilterReason"/> completion is being updated.</param>
-        /// <param name="snapshot">Text snapshot of the view's top buffer</param>
-        /// <param name="applicableSpan">Span which tracks the location of the completion session and user's input</param>
-        /// <param name="selectedFilters">Filters, their availability and selection state</param>
-        /// <param name="view">Instance of <see cref="ITextView"/> that hosts the completion</param>
+        /// <param name="session">The active <see cref="IAsyncCompletionSession"/>. See <see cref="IAsyncCompletionSession.ApplicableToSpan"/> and <see cref="IAsyncCompletionSession.TextView"/></param>
+        /// <param name="data">Contains properties applicable at the time this method is invoked.</param>
         /// <param name="token">Cancellation token that may interrupt this operation</param>
         /// <returns>Instance of <see cref="FilteredCompletionModel"/> that contains completion items to render, filters to display and recommended item to select</returns>
         Task<FilteredCompletionModel> UpdateCompletionListAsync(
-            ImmutableArray<CompletionItem> sortedList,
-            CompletionTriggerReason triggerReason,
-            CompletionFilterReason filterReason,
-            ITextSnapshot snapshot,
-            ITrackingSpan applicableSpan,
-            ImmutableArray<CompletionFilterWithState> selectedFilters,
-            ITextView view,
+            IAsyncCompletionSession session,
+            AsyncCompletionSessionDataSnapshot data,
             CancellationToken token);
 
         /// <summary>
         /// This method is first called before completion is about to appear,
         /// and then on subsequent typing events and when user toggles completion filters.
         /// The result of this method will be used in subsequent invocations of <see cref="UpdateCompletionListAsync"/>
-        /// User's input is tracked by <see cref="ITrackingSpan"/> on a <see cref="ITextSnapshot"/> in a <see cref="ITextView"/>.
+        /// <paramref name="session"/> tracks user user's input tracked with <see cref="IAsyncCompletionSession.ApplicableToSpan"/>.
+        /// <paramref name="data"/> provides applicable <see cref="AsyncCompletionSessionDataSnapshot.Snapshot"/> and 
         /// </summary>
-        /// <param name="initialList">Set of <see cref="CompletionItem"/>s to filter and sort</param>
-        /// <param name="triggerReason">The <see cref="CompletionTriggerReason"/> completion was initially triggered.</param>
-        /// <param name="snapshot">Text snapshot of the view's top buffer</param>
-        /// <param name="applicableSpan">Span which tracks the location of the completion session and user's input</param>
-        /// <param name="view">Instance of <see cref="ITextView"/> that hosts the completion</param>
+        /// <param name="session">The active <see cref="IAsyncCompletionSession"/>. See <see cref="IAsyncCompletionSession.ApplicableToSpan"/> and <see cref="IAsyncCompletionSession.TextView"/></param>
+        /// <param name="data">Contains properties applicable at the time this method is invoked.</param>
         /// <param name="token">Cancellation token that may interrupt this operation</param>
         /// <returns>Instance of <see cref="FilteredCompletionModel"/> that contains completion items to render, filters to display and recommended item to select</returns>
         Task<ImmutableArray<CompletionItem>> SortCompletionListAsync(
-            ImmutableArray<CompletionItem> initialList,
-            CompletionTriggerReason triggerReason,
-            ITextSnapshot snapshot,
-            ITrackingSpan applicableSpan,
-            ITextView view,
+            IAsyncCompletionSession session,
+            AsyncCompletionSessionInitialDataSnapshot data,
             CancellationToken token);
     }
 }

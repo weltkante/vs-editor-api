@@ -44,7 +44,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 args.TextView,
                 this.EditorOptionsFactoryService,
                 this.NavigatorSelectorService);
-            return storedCommandState.GetContractCommandState(args.TextView);
+            return storedCommandState.GetContractCommandState();
         }
 
         public bool ExecuteCommand(ExpandSelectionCommandArgs args, CommandExecutionContext context)

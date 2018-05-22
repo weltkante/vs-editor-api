@@ -38,9 +38,13 @@
         internal readonly Stack<Tuple<VirtualSnapshotSpan, TextSelectionMode>> previousExpansionsStack
             = new Stack<Tuple<VirtualSnapshotSpan, TextSelectionMode>>();
 
+#pragma warning disable CA1822 // Mark members as static
+#pragma warning disable CA1801 // Review unused parameters
         public CommandState GetExpandCommandState(ITextView textView) => CommandState.Available;
+#pragma warning restore CA1801 // Review unused parameters
+#pragma warning restore CA1822 // Mark members as static
 
-        public CommandState GetContractCommandState(ITextView textView)
+        public CommandState GetContractCommandState()
         {
             if (this.previousExpansionsStack.Count > 0)
             {

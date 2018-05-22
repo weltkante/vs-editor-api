@@ -1,4 +1,6 @@
-﻿using System.Collections.Immutable;
+﻿using System;
+using System.Collections.Immutable;
+using Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Data;
 using Microsoft.VisualStudio.Text;
 
 namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
@@ -6,7 +8,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
     /// <summary>
     /// Represents an immutable snapshot of state of the async completion feature.
     /// </summary>
-    sealed class CompletionModel
+    internal sealed class CompletionModel
     {
         /// <summary>
         /// All items, as provided by completion item sources.
@@ -46,7 +48,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// <summary>
         /// Whether suggestion mode item should be visible.
         /// </summary>
-        public readonly bool DisplaySuggestionMode;
+        public readonly bool DisplaySuggestionItem;
 
         /// <summary>
         /// Whether suggestion mode item should be selected.
@@ -57,7 +59,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// <see cref="CompletionItem"/> which contains user-entered text.
         /// Used to display and commit the suggestion mode item
         /// </summary>
-        public readonly CompletionItem SuggestionModeItem;
+        public readonly CompletionItem SuggestionItem;
 
         /// <summary>
         /// <see cref="CompletionItem"/> which overrides regular unique item selection.
@@ -69,14 +71,21 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// This flags prevents <see cref="IAsyncCompletionSession"/> from dismissing when it initially becomes empty.
         /// We dismiss when this flag is set (span is empty) and user attempts to remove characters.
         /// </summary>
-        public readonly bool ApplicableSpanWasEmpty;
+        public readonly bool ApplicableToSpanWasEmpty;
+
+        /// <summary>
+        /// Whether completion is unavailable (hidden and impossible to commit).
+        /// This allows language to not display completion when certain initial conditions are met.
+        /// For more info, ask Roslyn devs about completion behavior with method parameters that are not of enum type.
+        /// </summary>
+        public readonly bool InitiallyUnavailable;
 
         /// <summary>
         /// Constructor for the initial model
         /// </summary>
         public CompletionModel(ImmutableArray<CompletionItem> initialItems, ImmutableArray<CompletionItem> sortedItems,
             ITextSnapshot snapshot, ImmutableArray<CompletionFilterWithState> filters, bool useSoftSelection,
-            bool useSuggestionMode, bool selectSuggestionItem, CompletionItem suggestionModeItem)
+            bool displaySuggestionItem, bool selectSuggestionItem, CompletionItem suggestionItem, bool initiallyUnavailable)
         {
             InitialItems = initialItems;
             SortedItems = sortedItems;
@@ -84,11 +93,12 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             Filters = filters;
             SelectedIndex = 0;
             UseSoftSelection = useSoftSelection;
-            DisplaySuggestionMode = useSuggestionMode;
+            DisplaySuggestionItem = displaySuggestionItem;
             SelectSuggestionItem = selectSuggestionItem;
-            SuggestionModeItem = suggestionModeItem;
+            SuggestionItem = suggestionItem;
             UniqueItem = null;
-            ApplicableSpanWasEmpty = false;
+            ApplicableToSpanWasEmpty = false;
+            InitiallyUnavailable = initiallyUnavailable;
         }
 
         /// <summary>
@@ -96,8 +106,8 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         /// </summary>
         private CompletionModel(ImmutableArray<CompletionItem> initialItems, ImmutableArray<CompletionItem> sortedItems,
             ITextSnapshot snapshot, ImmutableArray<CompletionFilterWithState> filters, ImmutableArray<CompletionItemWithHighlight> presentedItems,
-            bool useSoftSelection, bool useSuggestionMode, int selectedIndex, bool selectSuggestionItem, CompletionItem suggestionModeItem,
-            CompletionItem uniqueItem, bool applicableSpanWasEmpty)
+            bool useSoftSelection, bool displaySuggestionItem, int selectedIndex, bool selectSuggestionItem, CompletionItem suggestionItem,
+            CompletionItem uniqueItem, bool applicableToSpanWasEmpty, bool initiallyUnavailable)
         {
             InitialItems = initialItems;
             SortedItems = sortedItems;
@@ -106,11 +116,12 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             PresentedItems = presentedItems;
             SelectedIndex = selectedIndex;
             UseSoftSelection = useSoftSelection;
-            DisplaySuggestionMode = useSuggestionMode;
+            DisplaySuggestionItem = displaySuggestionItem;
             SelectSuggestionItem = selectSuggestionItem;
-            SuggestionModeItem = suggestionModeItem;
+            SuggestionItem = suggestionItem;
             UniqueItem = uniqueItem;
-            ApplicableSpanWasEmpty = applicableSpanWasEmpty;
+            ApplicableToSpanWasEmpty = applicableToSpanWasEmpty;
+            InitiallyUnavailable = initiallyUnavailable;
         }
 
         public CompletionModel WithPresentedItems(ImmutableArray<CompletionItemWithHighlight> newPresentedItems, int newSelectedIndex)
@@ -122,12 +133,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 filters: Filters,
                 presentedItems: newPresentedItems, // Updated
                 useSoftSelection: UseSoftSelection,
-                useSuggestionMode: DisplaySuggestionMode,
+                displaySuggestionItem: DisplaySuggestionItem,
                 selectedIndex: newSelectedIndex, // Updated
                 selectSuggestionItem: SelectSuggestionItem,
-                suggestionModeItem: SuggestionModeItem,
+                suggestionItem: SuggestionItem,
                 uniqueItem: UniqueItem,
-                applicableSpanWasEmpty: ApplicableSpanWasEmpty
+                applicableToSpanWasEmpty: ApplicableToSpanWasEmpty,
+                initiallyUnavailable: InitiallyUnavailable
             );
         }
 
@@ -140,12 +152,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 filters: Filters,
                 presentedItems: PresentedItems,
                 useSoftSelection: UseSoftSelection,
-                useSuggestionMode: DisplaySuggestionMode,
+                displaySuggestionItem: DisplaySuggestionItem,
                 selectedIndex: SelectedIndex,
                 selectSuggestionItem: SelectSuggestionItem,
-                suggestionModeItem: SuggestionModeItem,
+                suggestionItem: SuggestionItem,
                 uniqueItem: UniqueItem,
-                applicableSpanWasEmpty: ApplicableSpanWasEmpty
+                applicableToSpanWasEmpty: ApplicableToSpanWasEmpty,
+                initiallyUnavailable: InitiallyUnavailable
             );
         }
 
@@ -158,12 +171,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 filters: newFilters, // Updated
                 presentedItems: PresentedItems,
                 useSoftSelection: UseSoftSelection,
-                useSuggestionMode: DisplaySuggestionMode,
+                displaySuggestionItem: DisplaySuggestionItem,
                 selectedIndex: SelectedIndex,
                 selectSuggestionItem: SelectSuggestionItem,
-                suggestionModeItem: SuggestionModeItem,
+                suggestionItem: SuggestionItem,
                 uniqueItem: UniqueItem,
-                applicableSpanWasEmpty: ApplicableSpanWasEmpty
+                applicableToSpanWasEmpty: ApplicableToSpanWasEmpty,
+                initiallyUnavailable: InitiallyUnavailable
             );
         }
 
@@ -176,12 +190,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 filters: Filters,
                 presentedItems: PresentedItems,
                 useSoftSelection: false, // Explicit selection and soft selection are mutually exclusive
-                useSuggestionMode: DisplaySuggestionMode,
+                displaySuggestionItem: DisplaySuggestionItem,
                 selectedIndex: newIndex, // Updated
                 selectSuggestionItem: false, // Explicit selection of regular item
-                suggestionModeItem: SuggestionModeItem,
+                suggestionItem: SuggestionItem,
                 uniqueItem: UniqueItem,
-                applicableSpanWasEmpty: ApplicableSpanWasEmpty
+                applicableToSpanWasEmpty: ApplicableToSpanWasEmpty,
+                initiallyUnavailable: InitiallyUnavailable
             );
         }
 
@@ -194,16 +209,17 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 filters: Filters,
                 presentedItems: PresentedItems,
                 useSoftSelection: false, // Explicit selection and soft selection are mutually exclusive
-                useSuggestionMode: DisplaySuggestionMode,
+                displaySuggestionItem: DisplaySuggestionItem,
                 selectedIndex: -1, // Deselect regular item
                 selectSuggestionItem: true, // Explicit selection of suggestion item
-                suggestionModeItem: SuggestionModeItem,
+                suggestionItem: SuggestionItem,
                 uniqueItem: UniqueItem,
-                applicableSpanWasEmpty: ApplicableSpanWasEmpty
+                applicableToSpanWasEmpty: ApplicableToSpanWasEmpty,
+                initiallyUnavailable: InitiallyUnavailable
             );
         }
 
-        public CompletionModel WithSuggestionModeActive(bool newUseSuggestionMode)
+        public CompletionModel WithSuggestionItemVisibility(bool newDisplaySuggestionItem)
         {
             return new CompletionModel(
                 initialItems: InitialItems,
@@ -211,34 +227,14 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 snapshot: Snapshot,
                 filters: Filters,
                 presentedItems: PresentedItems,
-                useSoftSelection: UseSoftSelection | newUseSuggestionMode, // Enabling suggestion mode also enables soft selection
-                useSuggestionMode: newUseSuggestionMode, // Updated
+                useSoftSelection: UseSoftSelection | newDisplaySuggestionItem, // Enabling suggestion mode also enables soft selection
+                displaySuggestionItem: newDisplaySuggestionItem, // Updated
                 selectedIndex: SelectedIndex,
                 selectSuggestionItem: SelectSuggestionItem,
-                suggestionModeItem: SuggestionModeItem,
+                suggestionItem: SuggestionItem,
                 uniqueItem: UniqueItem,
-                applicableSpanWasEmpty: ApplicableSpanWasEmpty
-            );
-        }
-
-        /// <summary>
-        /// </summary>
-        /// <param name="newSuggestionModeItem">It is ok to pass in null when there is no suggestion. UI will display SuggestsionModeDescription instead.</param>
-        internal CompletionModel WithSuggestionModeItem(CompletionItem newSuggestionModeItem)
-        {
-            return new CompletionModel(
-                initialItems: InitialItems,
-                sortedItems: SortedItems,
-                snapshot: Snapshot,
-                filters: Filters,
-                presentedItems: PresentedItems,
-                useSoftSelection: UseSoftSelection,
-                useSuggestionMode: DisplaySuggestionMode,
-                selectedIndex: SelectedIndex,
-                selectSuggestionItem: SelectSuggestionItem,
-                suggestionModeItem: newSuggestionModeItem,
-                uniqueItem: UniqueItem,
-                applicableSpanWasEmpty: ApplicableSpanWasEmpty
+                applicableToSpanWasEmpty: ApplicableToSpanWasEmpty,
+                initiallyUnavailable: InitiallyUnavailable
             );
         }
 
@@ -255,12 +251,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 filters: Filters,
                 presentedItems: PresentedItems,
                 useSoftSelection: UseSoftSelection,
-                useSuggestionMode: DisplaySuggestionMode,
+                displaySuggestionItem: DisplaySuggestionItem,
                 selectedIndex: SelectedIndex,
                 selectSuggestionItem: SelectSuggestionItem,
-                suggestionModeItem: SuggestionModeItem,
+                suggestionItem: SuggestionItem,
                 uniqueItem: newUniqueItem,
-                applicableSpanWasEmpty: ApplicableSpanWasEmpty
+                applicableToSpanWasEmpty: ApplicableToSpanWasEmpty,
+                initiallyUnavailable: InitiallyUnavailable
             );
         }
 
@@ -273,17 +270,18 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 filters: Filters,
                 presentedItems: PresentedItems,
                 useSoftSelection: newSoftSelection, // Updated
-                useSuggestionMode: DisplaySuggestionMode,
+                displaySuggestionItem: DisplaySuggestionItem,
                 selectedIndex: SelectedIndex,
                 selectSuggestionItem: SelectSuggestionItem,
-                suggestionModeItem: SuggestionModeItem,
+                suggestionItem: SuggestionItem,
                 uniqueItem: UniqueItem,
-                applicableSpanWasEmpty: ApplicableSpanWasEmpty
+                applicableToSpanWasEmpty: ApplicableToSpanWasEmpty,
+                initiallyUnavailable: InitiallyUnavailable
             );
         }
 
         internal CompletionModel WithSnapshotItemsAndFilters(ITextSnapshot snapshot, ImmutableArray<CompletionItemWithHighlight> presentedItems,
-            int selectedIndex, CompletionItem uniqueItem, CompletionItem suggestionModeItem, ImmutableArray<CompletionFilterWithState> filters)
+            int selectedIndex, CompletionItem uniqueItem, CompletionItem suggestionItem, ImmutableArray<CompletionFilterWithState> filters)
         {
             return new CompletionModel(
                 initialItems: InitialItems,
@@ -292,16 +290,17 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 filters: filters, // Updated
                 presentedItems: presentedItems, // Updated
                 useSoftSelection: UseSoftSelection,
-                useSuggestionMode: DisplaySuggestionMode,
+                displaySuggestionItem: DisplaySuggestionItem,
                 selectedIndex: selectedIndex, // Updated
                 selectSuggestionItem: SelectSuggestionItem,
-                suggestionModeItem: suggestionModeItem, // Updated
+                suggestionItem: suggestionItem, // Updated
                 uniqueItem: uniqueItem, // Updated
-                applicableSpanWasEmpty: ApplicableSpanWasEmpty
+                applicableToSpanWasEmpty: ApplicableToSpanWasEmpty,
+                initiallyUnavailable: InitiallyUnavailable
             );
         }
 
-        internal CompletionModel WithApplicableSpanEmptyInformation(bool applicableSpanIsEmpty)
+        internal CompletionModel WithApplicableToSpanStatus(bool applicableSpanIsEmpty)
         {
             return new CompletionModel(
                 initialItems: InitialItems,
@@ -310,12 +309,32 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 filters: Filters,
                 presentedItems: PresentedItems,
                 useSoftSelection: UseSoftSelection,
-                useSuggestionMode: DisplaySuggestionMode,
+                displaySuggestionItem: DisplaySuggestionItem,
                 selectedIndex: SelectedIndex,
                 selectSuggestionItem: SelectSuggestionItem,
-                suggestionModeItem: SuggestionModeItem,
+                suggestionItem: SuggestionItem,
                 uniqueItem: UniqueItem,
-                applicableSpanWasEmpty: applicableSpanIsEmpty // Updated
+                applicableToSpanWasEmpty: applicableSpanIsEmpty, // Updated
+                initiallyUnavailable: InitiallyUnavailable
+            );
+        }
+
+        internal CompletionModel WithInitialAvailability()
+        {
+            return new CompletionModel(
+                initialItems: InitialItems,
+                sortedItems: SortedItems,
+                snapshot: Snapshot,
+                filters: Filters,
+                presentedItems: PresentedItems,
+                useSoftSelection: UseSoftSelection,
+                displaySuggestionItem: DisplaySuggestionItem,
+                selectedIndex: SelectedIndex,
+                selectSuggestionItem: SelectSuggestionItem,
+                suggestionItem: SuggestionItem,
+                uniqueItem: UniqueItem,
+                applicableToSpanWasEmpty: ApplicableToSpanWasEmpty,
+                initiallyUnavailable: false // Updated
             );
         }
     }

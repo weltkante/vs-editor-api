@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Microsoft.VisualStudio.Utilities.Features
+namespace Microsoft.VisualStudio.Utilities
 {
     /// <summary>
     /// Defines a feature which may be disabled using <see cref="IFeatureService"/> and grouped using <see cref="BaseDefinitionAttribute"/>

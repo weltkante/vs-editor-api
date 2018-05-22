@@ -2,6 +2,7 @@
 using System.Collections.Immutable;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Data;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 
@@ -19,7 +20,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             _options = options ?? throw new ArgumentNullException(nameof(options));
         }
 
-        Task<CompletionContext> IAsyncCompletionSource.GetCompletionContextAsync(CompletionTrigger trigger, SnapshotPoint triggerLocation, SnapshotSpan applicableSpan, CancellationToken token)
+        Task<CompletionContext> IAsyncCompletionSource.GetCompletionContextAsync(InitialTrigger trigger, SnapshotPoint triggerLocation, SnapshotSpan applicableSpan, CancellationToken token)
         {
             throw new NotImplementedException("This item source is not meant to be registered. It is used only to provide a tooltip.");
         }
@@ -29,7 +30,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             return Task.FromResult<object>(_options.ToolTipText);
         }
 
-        bool IAsyncCompletionSource.TryGetApplicableSpan(char typeChar, SnapshotPoint triggerLocation, out SnapshotSpan applicableSpan)
+        bool IAsyncCompletionSource.TryGetApplicableToSpan(char typeChar, SnapshotPoint triggerLocation, out SnapshotSpan applicableSpan, CancellationToken token)
         {
             applicableSpan = default(SnapshotSpan);
             return false;

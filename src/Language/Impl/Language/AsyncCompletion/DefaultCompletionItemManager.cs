@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.Core.Imaging;
+using Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Data;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Text.PatternMatching;
@@ -16,7 +17,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
     [Export(typeof(IAsyncCompletionItemManagerProvider))]
     [Name(PredefinedCompletionNames.DefaultCompletionItemManager)]
     [ContentType("text")]
-    internal class DefaultCompletionItemManagerProvider : IAsyncCompletionItemManagerProvider
+    internal sealed class DefaultCompletionItemManagerProvider : IAsyncCompletionItemManagerProvider
     {
         [Import]
         public IPatternMatcherFactory PatternMatcherFactory;
@@ -31,7 +32,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         }
     }
 
-    internal class DefaultCompletionItemManager : IAsyncCompletionItemManager
+    internal sealed class DefaultCompletionItemManager : IAsyncCompletionItemManager
     {
         readonly IPatternMatcherFactory _patternMatcherFactory;
 
@@ -40,23 +41,22 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             _patternMatcherFactory = patternMatcherFactory;
         }
 
-        Task<FilteredCompletionModel> IAsyncCompletionItemManager.UpdateCompletionListAsync(
-            ImmutableArray<CompletionItem> sortedList, CompletionTriggerReason triggerReason, CompletionFilterReason filterReason,
-            ITextSnapshot snapshot, ITrackingSpan applicableSpan, ImmutableArray<CompletionFilterWithState> filters, ITextView view, CancellationToken token)
+        Task<FilteredCompletionModel> IAsyncCompletionItemManager.UpdateCompletionListAsync
+            (IAsyncCompletionSession session, AsyncCompletionSessionDataSnapshot data, CancellationToken token)
         {
             // Filter by text
-            var filterText = applicableSpan.GetText(snapshot);
+            var filterText = session.ApplicableToSpan.GetText(data.Snapshot);
             if (string.IsNullOrWhiteSpace(filterText))
             {
                 // There is no text filtering. Just apply user filters, sort alphabetically and return.
-                IEnumerable<CompletionItem> listFiltered = sortedList;
-                if (filters.Any(n => n.IsSelected))
+                IEnumerable<CompletionItem> listFiltered = data.InitialSortedList;
+                if (data.SelectedFilters.Any(n => n.IsSelected))
                 {
-                    listFiltered = sortedList.Where(n => ShouldBeInCompletionList(n, filters));
+                    listFiltered = listFiltered.Where(n => ShouldBeInCompletionList(n, data.SelectedFilters));
                 }
                 var listSorted = listFiltered.OrderBy(n => n.SortText);
                 var listHighlighted = listSorted.Select(n => new CompletionItemWithHighlight(n)).ToImmutableArray();
-                return Task.FromResult(new FilteredCompletionModel(listHighlighted, 0, filters));
+                return Task.FromResult(new FilteredCompletionModel(listHighlighted, 0, data.SelectedFilters));
             }
 
             // Pattern matcher not only filters, but also provides a way to order the results by their match quality.
@@ -65,32 +65,32 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 filterText,
                 new PatternMatcherCreationOptions(System.Globalization.CultureInfo.CurrentCulture, PatternMatcherCreationFlags.IncludeMatchedSpans));
 
-            var matches = sortedList
+            var matches = data.InitialSortedList
                 // Perform pattern matching
                 .Select(completionItem => (completionItem, patternMatcher.TryMatch(completionItem.FilterText)))
                 // Pick only items that were matched, unless length of filter text is 1
                 .Where(n => (filterText.Length == 1 || n.Item2.HasValue));
 
             // See which filters might be enabled based on the typed code
-            var textFilteredFilters = matches.SelectMany(n => n.Item1.Filters).Distinct();
+            var textFilteredFilters = matches.SelectMany(n => n.completionItem.Filters).Distinct();
 
             // When no items are available for a given filter, it becomes unavailable
-            var updatedFilters = ImmutableArray.CreateRange(filters.Select(n => n.WithAvailability(textFilteredFilters.Contains(n.Filter))));
+            var updatedFilters = ImmutableArray.CreateRange(data.SelectedFilters.Select(n => n.WithAvailability(textFilteredFilters.Contains(n.Filter))));
 
             // Filter by user-selected filters. The value on availableFiltersWithSelectionState conveys whether the filter is selected.
             var filterFilteredList = matches;
-            if (filters.Any(n => n.IsSelected))
+            if (data.SelectedFilters.Any(n => n.IsSelected))
             {
-                filterFilteredList = matches.Where(n => ShouldBeInCompletionList(n.Item1, filters));
+                filterFilteredList = matches.Where(n => ShouldBeInCompletionList(n.completionItem, data.SelectedFilters));
             }
 
             var bestMatch = filterFilteredList.OrderByDescending(n => n.Item2.HasValue).ThenBy(n => n.Item2).FirstOrDefault();
-            var listWithHighlights = filterFilteredList.Select(n => n.Item2.HasValue ? new CompletionItemWithHighlight(n.Item1, n.Item2.Value.MatchedSpans) : new CompletionItemWithHighlight(n.Item1)).ToImmutableArray();
+            var listWithHighlights = filterFilteredList.Select(n => n.Item2.HasValue ? new CompletionItemWithHighlight(n.completionItem, n.Item2.Value.MatchedSpans) : new CompletionItemWithHighlight(n.completionItem)).ToImmutableArray();
 
             int selectedItemIndex = 0;
             for (int i = 0; i < listWithHighlights.Length; i++)
             {
-                if (listWithHighlights[i].CompletionItem == bestMatch.Item1)
+                if (listWithHighlights[i].CompletionItem == bestMatch.completionItem)
                 {
                     selectedItemIndex = i;
                     break;
@@ -100,11 +100,10 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             return Task.FromResult(new FilteredCompletionModel(listWithHighlights, selectedItemIndex, updatedFilters));
         }
 
-        Task<ImmutableArray<CompletionItem>> IAsyncCompletionItemManager.SortCompletionListAsync(
-            ImmutableArray<CompletionItem> initialList, CompletionTriggerReason triggerReason, ITextSnapshot snapshot,
-            ITrackingSpan applicableSpan, ITextView view, CancellationToken token)
+        Task<ImmutableArray<CompletionItem>> IAsyncCompletionItemManager.SortCompletionListAsync
+            (IAsyncCompletionSession session, AsyncCompletionSessionInitialDataSnapshot data, CancellationToken token)
         {
-            return Task.FromResult(initialList.OrderBy(n => n.SortText).ToImmutableArray());
+            return Task.FromResult(data.InitialList.OrderBy(n => n.SortText).ToImmutableArray());
         }
 
         #region Filtering

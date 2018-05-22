@@ -349,6 +349,15 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Next/Previous Issue.
+        /// </summary>
+        internal static string NextIssue {
+            get {
+                return ResourceManager.GetString("NextIssue", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Make Line Endings Consistent.
         /// </summary>
         internal static string NormalizeLineEndings {

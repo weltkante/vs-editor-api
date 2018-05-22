@@ -26,6 +26,14 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                 textView.BufferGraph.MapDownToBuffer(point, PointTrackingMode.Negative, n, PositionAffinity.Predecessor) != null);
         }
 
+        /// <summary>
+        /// Returns whether the <see cref="ITextView"/> is furnished by the debugger,
+        /// e.g. it is a view in the breakpoint settings window or watch window.
+        /// </summary>
+        /// <param name="textView">View to examine</param>
+        /// <returns>True if the view has "DEBUGVIEW" text view role.</returns>
+        internal static bool IsDebuggerTextView(ITextView textView) => textView.Roles.Contains("DEBUGVIEW");
+
         static readonly EditorOptionKey<bool> SuggestionModeOptionKey = new EditorOptionKey<bool>(PredefinedCompletionNames.SuggestionModeInCompletionOptionName);
         static readonly EditorOptionKey<bool> SuggestionModeInDebuggerCompletionOptionKey = new EditorOptionKey<bool>(PredefinedCompletionNames.SuggestionModeInDebuggerCompletionOptionName);
         private const bool UseSuggestionModeDefaultValue = false;

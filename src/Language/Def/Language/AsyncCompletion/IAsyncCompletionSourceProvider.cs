@@ -1,4 +1,5 @@
-﻿using Microsoft.VisualStudio.Text;
+﻿using Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Data;
+using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 
 namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion

@@ -16,7 +16,6 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
     using System.IO;
     using System.Linq;
     using System.Text.RegularExpressions;
-    using System.Threading;
     using System.Windows;
 
     using Microsoft.VisualStudio.Text;
@@ -29,6 +28,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
 #if WINDOWS
     using Microsoft.VisualStudio.Language.Intellisense.Utilities;
 #endif
+    using Microsoft.VisualStudio.Text.MultiSelection;
+    using Selection = Microsoft.VisualStudio.Text.MultiSelection.Selection;
 
     /// <summary>
     /// Provides a default operations set on top of the text editor
@@ -65,6 +66,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         ITextUndoHistory _undoHistory;
         IViewPrimitives _editorPrimitives;
         IEditorOptions _editorOptions;
+        IMultiSelectionBroker _multiSelectionBroker;
 
         private ITrackingSpan _immProvisionalComposition;
 
@@ -93,13 +95,13 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         {
             // Validate
             if (textView == null)
-                throw new ArgumentNullException("textView");
+                throw new ArgumentNullException(nameof(textView));
             if (factory == null)
-                throw new ArgumentNullException("factory");
+                throw new ArgumentNullException(nameof(factory));
 
             _textView = textView;
             _factory = factory;
-
+            _multiSelectionBroker = factory.MultiSelectionBrokerFactory.GetOrCreateBroker(_textView);
             _editorPrimitives = factory.EditorPrimitivesProvider.GetViewPrimitives(textView);
             // Get the TextStructure Navigator
             _textStructureNavigator = factory.TextStructureNavigatorFactory.GetTextStructureNavigator(_textView.TextBuffer);
@@ -129,15 +131,13 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
             {
                 bool success = false;
 
-                var view = _textView as ITextView;
-
                 // find line start
-                var startViewLine = GetLineStart(view, view.Selection.Start.Position);
+                ITextViewLine startViewLine = GetLineStart(_textView, _textView.Selection.Start.Position);
                 SnapshotPoint start = startViewLine.Start;
                 ITextSnapshotLine startLine = start.GetContainingLine();
 
                 // find the last line view
-                var endViewLine = GetLineEnd(view, view.Selection.End.Position);
+                ITextViewLine endViewLine = GetLineEnd(_textView, _textView.Selection.End.Position);
                 SnapshotPoint end = endViewLine.EndIncludingLineBreak;
                 ITextSnapshotLine endLine = endViewLine.End.GetContainingLine();
 
@@ -146,22 +146,22 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 // Handle the case where multiple lines are selected and the caret is sitting just after the line break on the next line.
                 // Shortening the selection here handles the case where the last line is a collapsed region. Using endLine.End will give
                 // a line within the collapsed region instead of skipping it all together. 
-                if (GetLineEnd(view, startViewLine.Start) != endViewLine
-                    && view.Selection.End.Position == GetLineStart(view, view.Selection.End.Position).Start
-                    && !view.Selection.End.IsInVirtualSpace)
+                if (GetLineEnd(_textView, startViewLine.Start) != endViewLine
+                    && _textView.Selection.End.Position == GetLineStart(_textView, _textView.Selection.End.Position).Start
+                    && !_textView.Selection.End.IsInVirtualSpace)
                 {
                     endLine = snapshot.GetLineFromLineNumber(endLine.LineNumber - 1);
                     end = endLine.EndIncludingLineBreak;
-                    endViewLine = view.GetTextViewLineContainingBufferPosition(view.Selection.End.Position - 1);
+                    endViewLine = _textView.GetTextViewLineContainingBufferPosition(_textView.Selection.End.Position - 1);
                 }
 
                 #region Initial Asserts
 
-                Debug.Assert(view.Selection.Start.Position.Snapshot == view.TextSnapshot, "Selection is out of sync with view.");
+                Debug.Assert(_textView.Selection.Start.Position.Snapshot == _textView.TextSnapshot, "Selection is out of sync with view.");
 
-                Debug.Assert(view.TextSnapshot == view.TextBuffer.CurrentSnapshot, "View is out of sync with text buffer.");
+                Debug.Assert(_textView.TextSnapshot == _textView.TextBuffer.CurrentSnapshot, "View is out of sync with text buffer.");
 
-                Debug.Assert(view.TextSnapshot == snapshot, "Text view lines are out of sync with the view");
+                Debug.Assert(_textView.TextSnapshot == snapshot, "Text view lines are out of sync with the view");
 
                 #endregion
 
@@ -177,11 +177,11 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                     ITextSnapshotLine prevLine = snapshot.GetLineFromLineNumber(startLine.LineNumber - 1);
 
                     // prevLineExtent is different from prevLine.Extent and avoids issues around collapsed regions
-                    SnapshotPoint prevLineStart = GetLineStart(view, prevLine.Start).Start;
+                    SnapshotPoint prevLineStart = GetLineStart(_textView, prevLine.Start).Start;
                     SnapshotSpan prevLineExtent = new SnapshotSpan(prevLineStart, prevLine.End);
                     SnapshotSpan prevLineExtentIncludingLineBreak = new SnapshotSpan(prevLineStart, prevLine.EndIncludingLineBreak);
 
-                    using (ITextEdit edit = view.TextBuffer.CreateEdit())
+                    using (ITextEdit edit = _textView.TextBuffer.CreateEdit())
                     {
                         int offset;
 
@@ -193,7 +193,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                         bool hasCollapsedRegions = false;
 
                         IOutliningManager outliningManager = (_factory.OutliningManagerService != null)
-                                                             ? _factory.OutliningManagerService.GetOutliningManager(view)
+                                                             ? _factory.OutliningManagerService.GetOutliningManager(_textView)
                                                              : null;
 
                         if (outliningManager != null)
@@ -208,7 +208,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                             {
                                 using (ITextUndoTransaction undoTransaction = _undoHistory.CreateTransaction(Strings.MoveSelLinesUp))
                                 {
-                                    BeforeCollapsedMoveUndoPrimitive undoPrim = new BeforeCollapsedMoveUndoPrimitive(outliningManager, view, collapsedSpansInCurLine);
+                                    BeforeCollapsedMoveUndoPrimitive undoPrim = new BeforeCollapsedMoveUndoPrimitive(outliningManager, _textView, collapsedSpansInCurLine);
                                     undoTransaction.AddUndo(undoPrim);
                                     undoTransaction.Complete();
                                 }
@@ -237,11 +237,11 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                         if (!edit.HasFailedChanges)
                         {
                             // store the position before the edit is applied
-                            int anchorPos = view.Selection.AnchorPoint.Position.Position;
-                            int anchorVirtualSpace = view.Selection.AnchorPoint.VirtualSpaces;
-                            int activePos = view.Selection.ActivePoint.Position.Position;
-                            int activeVirtualSpace = view.Selection.ActivePoint.VirtualSpaces;
-                            var selectionMode = view.Selection.Mode;
+                            int anchorPos = _textView.Selection.AnchorPoint.Position.Position;
+                            int anchorVirtualSpace = _textView.Selection.AnchorPoint.VirtualSpaces;
+                            int activePos = _textView.Selection.ActivePoint.Position.Position;
+                            int activeVirtualSpace = _textView.Selection.ActivePoint.VirtualSpaces;
+                            var selectionMode = _textView.Selection.Mode;
 
                             // apply the edit
                             ITextSnapshot newSnapshot = edit.Apply();
@@ -266,8 +266,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                                 {
                                     // This comes from adhocoutliner.cs in env\editor\pkg\impl\outlining and will not be available outside of VS
                                     SimpleTagger<IOutliningRegionTag> simpleTagger =
-                                        view.TextBuffer.Properties.GetOrCreateSingletonProperty<SimpleTagger<IOutliningRegionTag>>(
-                                        () => new SimpleTagger<IOutliningRegionTag>(view.TextBuffer));
+                                        _textView.TextBuffer.Properties.GetOrCreateSingletonProperty<SimpleTagger<IOutliningRegionTag>>(
+                                        () => new SimpleTagger<IOutliningRegionTag>(_textView.TextBuffer));
 
                                     if (simpleTagger != null)
                                     {
@@ -316,7 +316,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                                                 // we need to recollapse after a redo
                                                 using (ITextUndoTransaction undoTransaction = _undoHistory.CreateTransaction(Strings.MoveSelLinesUp))
                                                 {
-                                                    AfterCollapsedMoveUndoPrimitive undoPrim = new AfterCollapsedMoveUndoPrimitive(outliningManager, view, spansForUndo);
+                                                    AfterCollapsedMoveUndoPrimitive undoPrim = new AfterCollapsedMoveUndoPrimitive(outliningManager, _textView, spansForUndo);
                                                     undoTransaction.AddUndo(undoPrim);
                                                     undoTransaction.Complete();
                                                 }
@@ -341,18 +341,15 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         {
             Func<bool> action = () =>
             {
-
                 bool success = false;
 
-                var view = _textView as ITextView;
-
                 // find line start
-                var startViewLine = GetLineStart(view, view.Selection.Start.Position);
+                ITextViewLine startViewLine = GetLineStart(_textView, _textView.Selection.Start.Position);
                 SnapshotPoint start = startViewLine.Start;
                 ITextSnapshotLine startLine = start.GetContainingLine();
 
                 // find the last line view
-                var endViewLine = GetLineEnd(view, view.Selection.End.Position);
+                ITextViewLine endViewLine = GetLineEnd(_textView, _textView.Selection.End.Position);
                 ITextSnapshotLine endLine = endViewLine.End.GetContainingLine();
 
                 ITextSnapshot snapshot = endLine.Snapshot;
@@ -360,21 +357,21 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 // Handle the case where multiple lines are selected and the caret is sitting just after the line break on the next line.
                 // Shortening the selection here handles the case where the last line is a collapsed region. Using endLine.End will give
                 // a line within the collapsed region instead of skipping it all together. 
-                if (GetLineEnd(view, startViewLine.Start) != endViewLine
-                    && view.Selection.End.Position == GetLineStart(view, view.Selection.End.Position).Start
-                    && !view.Selection.End.IsInVirtualSpace)
+                if (GetLineEnd(_textView, startViewLine.Start) != endViewLine
+                    && _textView.Selection.End.Position == GetLineStart(_textView, _textView.Selection.End.Position).Start
+                    && !_textView.Selection.End.IsInVirtualSpace)
                 {
                     endLine = snapshot.GetLineFromLineNumber(endLine.LineNumber - 1);
-                    endViewLine = view.GetTextViewLineContainingBufferPosition(view.Selection.End.Position - 1);
+                    endViewLine = _textView.GetTextViewLineContainingBufferPosition(_textView.Selection.End.Position - 1);
                 }
 
                 #region Initial Asserts
 
-                Debug.Assert(view.Selection.Start.Position.Snapshot == view.TextSnapshot, "Selection is out of sync with view.");
+                Debug.Assert(_textView.Selection.Start.Position.Snapshot == _textView.TextSnapshot, "Selection is out of sync with view.");
 
-                Debug.Assert(view.TextSnapshot == view.TextBuffer.CurrentSnapshot, "View is out of sync with text buffer.");
+                Debug.Assert(_textView.TextSnapshot == _textView.TextBuffer.CurrentSnapshot, "View is out of sync with text buffer.");
 
-                Debug.Assert(view.TextSnapshot == snapshot, "Text view lines are out of sync with the view");
+                Debug.Assert(_textView.TextSnapshot == snapshot, "Text view lines are out of sync with the view");
 
                 #endregion
 
@@ -387,11 +384,11 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 else
                 {
                     // nextLineExtent is different from prevLine.Extent and avoids issues around collapsed regions
-                    var lastNextLine = GetLineEnd(view, endViewLine.EndIncludingLineBreak);
+                    ITextViewLine lastNextLine = GetLineEnd(_textView, endViewLine.EndIncludingLineBreak);
                     SnapshotSpan nextLineExtent = new SnapshotSpan(endViewLine.EndIncludingLineBreak, lastNextLine.End);
                     SnapshotSpan nextLineExtentIncludingLineBreak = new SnapshotSpan(endViewLine.EndIncludingLineBreak, lastNextLine.EndIncludingLineBreak);
 
-                    using (ITextEdit edit = view.TextBuffer.CreateEdit())
+                    using (ITextEdit edit = _textView.TextBuffer.CreateEdit())
                     {
                         SnapshotSpan curLineExtent = new SnapshotSpan(startViewLine.Start, endViewLine.End);
                         SnapshotSpan curLineExtentIncLineBreak = new SnapshotSpan(startViewLine.Start, endViewLine.EndIncludingLineBreak);
@@ -410,7 +407,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                             bool hasCollapsedRegions = false;
 
                             IOutliningManager outliningManager = (_factory.OutliningManagerService != null)
-                                                                    ? _factory.OutliningManagerService.GetOutliningManager(view)
+                                                                    ? _factory.OutliningManagerService.GetOutliningManager(_textView)
                                                                     : null;
 
                             if (outliningManager != null)
@@ -425,7 +422,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                                 {
                                     using (ITextUndoTransaction undoTransaction = _undoHistory.CreateTransaction(Strings.MoveSelLinesDown))
                                     {
-                                        BeforeCollapsedMoveUndoPrimitive undoPrim = new BeforeCollapsedMoveUndoPrimitive(outliningManager, view, collapsedSpansInCurLine);
+                                        BeforeCollapsedMoveUndoPrimitive undoPrim = new BeforeCollapsedMoveUndoPrimitive(outliningManager, _textView, collapsedSpansInCurLine);
                                         undoTransaction.AddUndo(undoPrim);
                                         undoTransaction.Complete();
                                     }
@@ -455,11 +452,11 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                             }
                             else
                             {
-                                int anchorPos = view.Selection.AnchorPoint.Position.Position;
-                                int anchorVirtualSpace = view.Selection.AnchorPoint.VirtualSpaces;
-                                int activePos = view.Selection.ActivePoint.Position.Position;
-                                int activeVirtualSpace = view.Selection.ActivePoint.VirtualSpaces;
-                                var selectionMode = view.Selection.Mode;
+                                int anchorPos = _textView.Selection.AnchorPoint.Position.Position;
+                                int anchorVirtualSpace = _textView.Selection.AnchorPoint.VirtualSpaces;
+                                int activePos = _textView.Selection.ActivePoint.Position.Position;
+                                int activeVirtualSpace = _textView.Selection.ActivePoint.VirtualSpaces;
+                                var selectionMode = _textView.Selection.Mode;
 
                                 ITextSnapshot newSnapshot = edit.Apply();
                                 if (newSnapshot == snapshot)
@@ -483,7 +480,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                                     {
                                         // This comes from adhocoutliner.cs in env\editor\pkg\impl\outlining and will not be available outside of VS
                                         SimpleTagger<IOutliningRegionTag> simpleTagger =
-                                            view.TextBuffer.Properties.GetOrCreateSingletonProperty<SimpleTagger<IOutliningRegionTag>>(() => new SimpleTagger<IOutliningRegionTag>(view.TextBuffer));
+                                            _textView.TextBuffer.Properties.GetOrCreateSingletonProperty<SimpleTagger<IOutliningRegionTag>>(() => new SimpleTagger<IOutliningRegionTag>(_textView.TextBuffer));
 
                                         if (simpleTagger != null)
                                         {
@@ -532,7 +529,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                                                     // we need to recollapse after a redo
                                                     using (ITextUndoTransaction undoTransaction = _undoHistory.CreateTransaction(Strings.MoveSelLinesDown))
                                                     {
-                                                        AfterCollapsedMoveUndoPrimitive undoPrim = new AfterCollapsedMoveUndoPrimitive(outliningManager, view, spansForUndo);
+                                                        AfterCollapsedMoveUndoPrimitive undoPrim = new AfterCollapsedMoveUndoPrimitive(outliningManager, _textView, spansForUndo);
                                                         undoTransaction.AddUndo(undoPrim);
                                                         undoTransaction.Complete();
                                                     }
@@ -555,7 +552,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
 
         private static ITextViewLine GetLineStart(ITextView view, SnapshotPoint snapshotPoint)
         {
-            var line = view.GetTextViewLineContainingBufferPosition(snapshotPoint);
+            ITextViewLine line = view.GetTextViewLineContainingBufferPosition(snapshotPoint);
             while (!line.IsFirstTextViewLineForSnapshotLine)
             {
                 line = view.GetTextViewLineContainingBufferPosition(line.Start - 1);
@@ -565,7 +562,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
 
         private static ITextViewLine GetLineEnd(ITextView view, SnapshotPoint snapshotPoint)
         {
-            var line = view.GetTextViewLineContainingBufferPosition(snapshotPoint);
+            ITextViewLine line = view.GetTextViewLineContainingBufferPosition(snapshotPoint);
             while (!line.IsLastTextViewLineForSnapshotLine)
             {
                 line = view.GetTextViewLineContainingBufferPosition(line.EndIncludingLineBreak);
@@ -592,41 +589,33 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         {
             bool empty = (anchorPoint == activePoint);
 
-            // TODO: Whenever caret/selection is updated to offer a way to set both simultaneously without either eventing before
-            //       the other is updated, we should update this method to use that.  There are potential bugs below in how clients
-            //       react to things like selection moving.  For example, if someone reacts to moving the selection by moving the caret,
-            //       the logic below will override that caret position, which may not be desirable.
-
-            // The order of operations here is important:
-            // 1) We need to move the selection first.  Clients (like VB) who listen for caret change need the selection to be correct,
-            //    and we have yet to have clients that require the opposite order.  See Dev10 #793198 for what happens when we do this selection-first.
-            //            
-            // 2) Then we move the caret.  This behaves differently, depending on if the new selection is empty or not (explained below).
-
-            if (empty)
+            using (var batchOp = _multiSelectionBroker.BeginBatchOperation())
             {
-                _textView.Selection.Clear();
-                _textView.Selection.Mode = selectionMode;
+                if (empty)
+                {
+                    _textView.Selection.Clear();
+                    _textView.Selection.Mode = selectionMode;
 
-                // Since the selection is empty, move the caret to the provided active point and translate that point
-                // to the view's text snapshot (in case someone was listening to the selection changed event and made a text edit).
-                // The empty selection will track the caret.
-                //   See Dev10 #785792 for an example of what happens when we get this wrong by moving the caret to the active point
-                //   of the selection when the selection is being cleared.
-                _textView.Caret.MoveTo(activePoint.TranslateTo(_textView.TextSnapshot));
-            }
-            else
-            {
-                _textView.Selection.Select(anchorPoint, activePoint);
-                _textView.Selection.Mode = selectionMode;
+                    // Since the selection is empty, move the caret to the provided active point and translate that point
+                    // to the view's text snapshot (in case someone was listening to the selection changed event and made a text edit).
+                    // The empty selection will track the caret.
+                    //   See Dev10 #785792 for an example of what happens when we get this wrong by moving the caret to the active point
+                    //   of the selection when the selection is being cleared.
+                    _textView.Caret.MoveTo(activePoint.TranslateTo(_textView.TextSnapshot));
+                }
+                else
+                {
+                    _textView.Selection.Select(anchorPoint, activePoint);
+                    _textView.Selection.Mode = selectionMode;
 
-                // Move the caret to the active point of the selection (don't use activePoint since someone -- on the selection changed event -- might have
-                // moved the selection).
-                // But if the selection is empty (it shouldn't be since anchorPoint != activePoint, but those points could be normalized to an empty span
-                // or someone could have moved it), move the caret to the requested activePoint.
-                _textView.Caret.MoveTo(_textView.Selection.IsEmpty
-                                       ? activePoint.TranslateTo(_textView.TextSnapshot)
-                                       : _textView.Selection.ActivePoint);
+                    // Move the caret to the active point of the selection (don't use activePoint since someone -- on the selection changed event -- might have
+                    // moved the selection).
+                    // But if the selection is empty (it shouldn't be since anchorPoint != activePoint, but those points could be normalized to an empty span
+                    // or someone could have moved it), move the caret to the requested activePoint.
+                    _textView.Caret.MoveTo(_textView.Selection.IsEmpty
+                                           ? activePoint.TranslateTo(_textView.TextSnapshot)
+                                           : _textView.Selection.ActivePoint);
+                }
             }
 
             // 3) If scrollOptions were provided, we're going to try and make the span visible using the provided options.
@@ -657,7 +646,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void MoveToNextCharacter(bool select)
         {
-            _editorPrimitives.Caret.MoveToNextCharacter(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectToNextCaretPosition : PredefinedSelectionTransformations.MoveToNextCaretPosition);
+            _textView.Caret.EnsureVisible();
         }
 
         /// <summary>
@@ -668,18 +658,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void MoveToPreviousCharacter(bool select)
         {
-            bool isCaretAtStartOfViewLine = (!_textView.Caret.InVirtualSpace) &&
-                                            (_textView.Caret.Position.BufferPosition == _textView.Caret.ContainingTextViewLine.Start);
-
-            //Prevent the caret from moving from column 0 to the end of the previous line if either:
-            //  virtual space is turned on or
-            //  the user is extending a box selection.
-            if (isCaretAtStartOfViewLine && (_editorOptions.IsVirtualSpaceEnabled() || (select && (_textView.Selection.Mode == TextSelectionMode.Box))))
-            {
-                return;
-            }
-
-            _editorPrimitives.Caret.MoveToPreviousCharacter(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectToPreviousCaretPosition : PredefinedSelectionTransformations.MoveToPreviousCaretPosition);
+            _textView.Caret.EnsureVisible();
         }
 
         /// <summary>
@@ -690,7 +670,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void MoveToNextWord(bool select)
         {
-            _editorPrimitives.Caret.MoveToNextWord(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectToNextWord : PredefinedSelectionTransformations.MoveToNextWord);
+            _textView.Caret.EnsureVisible();
         }
 
         /// <summary>
@@ -701,15 +682,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void MoveToPreviousWord(bool select)
         {
-            // In extending a box selection, we don't want this to jump to the previous line (if
-            // we are on the beginning of a line)
-            if (select && _textView.Selection.Mode == TextSelectionMode.Box && !_textView.Caret.InVirtualSpace)
-            {
-                if (_editorPrimitives.Caret.CurrentPosition == _editorPrimitives.Caret.StartOfViewLine)
-                    return;
-            }
-
-            _editorPrimitives.Caret.MoveToPreviousWord(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectToPreviousWord : PredefinedSelectionTransformations.MoveToPreviousWord);
+            _textView.Caret.EnsureVisible();
         }
 
         /// <summary>
@@ -720,7 +694,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void MoveToStartOfDocument(bool select)
         {
-            _editorPrimitives.Caret.MoveToStartOfDocument(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectToStartOfDocument : PredefinedSelectionTransformations.MoveToStartOfDocument);
+            _textView.Caret.EnsureVisible();
         }
 
         /// <summary>
@@ -731,7 +706,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void MoveToEndOfDocument(bool select)
         {
-            _editorPrimitives.Caret.MoveToEndOfDocument(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectToEndOfDocument : PredefinedSelectionTransformations.MoveToEndOfDocument);
+            _textView.Caret.EnsureVisible();
         }
 
         /// <summary>
@@ -966,15 +942,6 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                     }
                 }
 
-                // If there is nothing to delete, clear the selection
-                if (spans.Count == 0)
-                {
-                    _textView.Caret.MoveTo(_textView.Selection.Start);
-                    _textView.Selection.Clear();
-                    _textView.Caret.EnsureVisible();
-                    return true;
-                }
-
                 boxDeletions = new NormalizedSnapshotSpanCollection(spans);
             }
 
@@ -1048,8 +1015,12 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
             ITextViewLine activeLine = (_textView.Selection.IsReversed) ? startLine : endLine;
             VirtualSnapshotPoint newCaret = activeLine.GetInsertionBufferPositionFromXCoordinate(leftEdge);
 
-            _textView.Caret.MoveTo(newCaret);
-            _textView.Selection.Clear();
+            _multiSelectionBroker.ClearSecondarySelections();
+            Selection unused;
+            _multiSelectionBroker.TryPerformActionOnSelection(_multiSelectionBroker.PrimarySelection, transformer =>
+            {
+                transformer.MoveTo(newCaret, select: false, PositionAffinity.Successor);
+            }, out unused);
         }
 
         public bool DeleteFullLine()
@@ -1255,7 +1226,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         {
             if (textLine == null)
             {
-                throw new ArgumentNullException("textLine");
+                throw new ArgumentNullException(nameof(textLine));
             }
 
             if (extendSelection)
@@ -1288,7 +1259,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void MoveLineUp(bool select)
         {
-            _editorPrimitives.Caret.MoveToPreviousLine(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectToPreviousLine : PredefinedSelectionTransformations.MoveToPreviousLine);
+            _textView.Caret.EnsureVisible();
         }
 
         /// <summary>
@@ -1299,7 +1271,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void MoveLineDown(bool select)
         {
-            _editorPrimitives.Caret.MoveToNextLine(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectToNextLine : PredefinedSelectionTransformations.MoveToNextLine);
+            _textView.Caret.EnsureVisible();
         }
 
         /// <summary>
@@ -1310,7 +1283,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void PageUp(bool select)
         {
-            _editorPrimitives.Caret.MovePageUp(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectPageUp : PredefinedSelectionTransformations.MovePageUp);
+
         }
 
         /// <summary>
@@ -1321,7 +1295,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void PageDown(bool select)
         {
-            _editorPrimitives.Caret.MovePageDown(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectPageDown : PredefinedSelectionTransformations.MovePageDown);
         }
 
         /// <summary>
@@ -1332,34 +1306,14 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// </param>
         public void MoveToEndOfLine(bool select)
         {
-            // If the caret is at the start of an empty line, respond by trying to position
-            // the caret at the smart indent location.
-            if (_textView.Caret.Position.BufferPosition.GetContainingLine().Extent.IsEmpty &&
-                !_textView.Caret.InVirtualSpace)
-            {
-                if (PositionCaretWithSmartIndent(useOnlyVirtualSpace: true, extendSelection: select))
-                {
-                    _editorPrimitives.Caret.EnsureVisible();
-                    return;
-                }
-            }
-
-            _editorPrimitives.Caret.MoveToEndOfViewLine(select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectToEndOfLine : PredefinedSelectionTransformations.MoveToEndOfLine);
+            _textView.Caret.EnsureVisible();
         }
 
         public void MoveToHome(bool select)
         {
-            int newPosition = _editorPrimitives.Caret.GetFirstNonWhiteSpaceCharacterOnViewLine().CurrentPosition;
-
-            // If the caret is already at the first non-whitespace character or
-            // the line is entirely whitepsace, move to the start of the view line.
-            if (newPosition == _editorPrimitives.Caret.CurrentPosition ||
-                newPosition == _editorPrimitives.Caret.EndOfViewLine)
-            {
-                newPosition = _editorPrimitives.Caret.StartOfViewLine;
-            }
-
-            _editorPrimitives.Caret.MoveTo(newPosition, select);
+            _multiSelectionBroker.PerformActionOnAllSelections(select ? PredefinedSelectionTransformations.SelectToHome : PredefinedSelectionTransformations.MoveToHome);
+            _textView.Caret.EnsureVisible();
         }
 
         public void MoveToStartOfLine(bool select)
@@ -1374,111 +1328,94 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         {
             Func<bool> action = () =>
             {
-                VirtualSnapshotPoint caret = _textView.Caret.Position.VirtualBufferPosition;
-                ITextSnapshotLine line = caret.Position.GetContainingLine();
-                ITextSnapshot snapshot = line.Snapshot;
+                bool editSucceeded = true;
+                ITextSnapshot snapshot = _textView.TextViewModel.EditBuffer.CurrentSnapshot;
 
-                // todo: the following logic is duplicated in DefaultTextPointPrimitive.InsertNewLine()
-                // didn't call that method here because it would result in two text transactions
-                // ultimately everything here should probably move into primitives.
-                string textToInsert = TextBufferOperationHelpers.GetNewLineCharacterToInsert(line, _editorOptions);
-
-                bool succeeded = false;
-                bool caretMoved = false;
-                EventHandler<CaretPositionChangedEventArgs> caretWatcher = delegate (object sender, CaretPositionChangedEventArgs e)
+                using (var batchOp = _multiSelectionBroker.BeginBatchOperation())
                 {
-                    caretMoved = true;
-                };
+                    var regionsToIndent = new List<Selection>();
 
-                // Indent unless the caret is at column 0 or the current line is empty. 
-                // This appears to be added as a fix for Venus; which combined with our implementation of 
-                // PositionCaretWithSmartIndent does not indent correctly on NewLine when Caret is at column 0.
-                bool doIndent = caret.IsInVirtualSpace || (caret.Position != _textView.Caret.ContainingTextViewLine.Start)
-                    || (_textView.Caret.ContainingTextViewLine.Extent.Length == 0);
-
-                try
-                {
                     using (var edit = _textView.TextBuffer.CreateEdit())
                     {
-                        _textView.Caret.PositionChanged += caretWatcher;
-                        int searchIndexforPreviousWhitespaces = -1;
-                        var lineContainingTrimTrailingWhitespacesSearchindex = line; // usually is the line containing  caret.
-
-                        if (_textView.Selection.Mode == TextSelectionMode.Stream)
+                        if (_multiSelectionBroker.IsBoxSelection)
                         {
+                            _multiSelectionBroker.BreakBoxSelection();
+                        }
+
+                        foreach (var region in _multiSelectionBroker.AllSelections)
+                        {
+                            bool doIndent = false;
+                            Selection newRegion;
+
+                            _multiSelectionBroker.TryPerformActionOnSelection(region, transformer =>
+                            {
+                                VirtualSnapshotPoint caret = transformer.Selection.InsertionPoint;
+                                ITextSnapshotLine line = caret.Position.GetContainingLine();
+                                ITextViewLine viewLine = _textView.GetTextViewLineContainingBufferPosition(caret.Position);
+
+                            // todo: the following logic is duplicated in DefaultTextPointPrimitive.InsertNewLine()
+                            // didn't call that method here because it would result in two text transactions
+                            // ultimately everything here should probably move into primitives.
+                            string textToInsert = TextBufferOperationHelpers.GetNewLineCharacterToInsert(line, _editorOptions);
+
+                            // Indent unless the caret is at column 0 or the current line is empty. 
+                            // This appears to be added as a fix for Venus; which combined with our implementation of 
+                            // PositionCaretWithSmartIndent does not indent correctly on NewLine when Caret is at column 0.
+                            doIndent = caret.IsInVirtualSpace || (caret.Position != viewLine.Extent.Start)
+                                            || (viewLine.Extent.Length == 0);
+
+                                int searchIndexforPreviousWhitespaces = -1;
+                                var lineContainingTrimTrailingWhitespacesSearchindex = line; // usually is the line containing  caret.
+
                             // This ignores virtual space
-                            Span selection = _textView.Selection.StreamSelectionSpan.SnapshotSpan;
-                            succeeded = edit.Replace(selection, textToInsert);
+                            Span selection = transformer.Selection.Extent.SnapshotSpan;
+
+                                editSucceeded = editSucceeded && edit.Replace(selection, textToInsert);
                             // For stream selection you should always look for trimming whitespaces previous to selection.start instead of caret position
                             lineContainingTrimTrailingWhitespacesSearchindex = snapshot.GetLineFromPosition(selection.Start);
-                            searchIndexforPreviousWhitespaces = selection.Start - lineContainingTrimTrailingWhitespacesSearchindex.Start.Position;
-                        }
-                        else
-                        {
-                            var isDeleteSuccessfull = true;
-                            searchIndexforPreviousWhitespaces = caret.Position.Position - line.Start.Position;
-                            foreach (var span in _textView.Selection.SelectedSpans)
+                                searchIndexforPreviousWhitespaces = selection.Start - lineContainingTrimTrailingWhitespacesSearchindex.Start.Position;
+                            // Trim traling whitespaces as we insert the new line as well if the editor option is set
+                            if (_editorOptions.GetOptionValue<bool>(DefaultOptions.TrimTrailingWhiteSpaceOptionId))
+                                {
+                                    var previousNonWhitespaceCharacterIndex = lineContainingTrimTrailingWhitespacesSearchindex.IndexOfPreviousNonWhiteSpaceCharacter(searchIndexforPreviousWhitespaces);
+
+                                // Note: If previousNonWhiteSpaceCharacter index is -1 this will automatically default to line.start.position
+                                var startIndexForTrailingWhitespaceSpan = lineContainingTrimTrailingWhitespacesSearchindex.Start.Position + previousNonWhitespaceCharacterIndex + 1;
+                                    var lengthOfTrailingWhitespaceSpan = searchIndexforPreviousWhitespaces - previousNonWhitespaceCharacterIndex - 1;
+
+                                    if (lengthOfTrailingWhitespaceSpan != 0) // If there are any whitespaces before the caret delete them
+                                    edit.Delete(new Span(startIndexForTrailingWhitespaceSpan, lengthOfTrailingWhitespaceSpan));
+                                }
+                            }, out newRegion);
+
+                            if (doIndent)
                             {
-                                // In a box selection if the caret is forward positioned then 
-                                //we should search for whitespaces from the start of the last span since the spans are not yet deleted
-                                if (span.End.Position == caret.Position.Position)
-                                {
-                                    searchIndexforPreviousWhitespaces = span.Start.Position - line.Start.Position;
-                                }
-                                if (!edit.Delete(span))
-                                {
-                                    isDeleteSuccessfull = false;
-                                }
+                                regionsToIndent.Add(newRegion);
                             }
-                            if (!isDeleteSuccessfull)
-                                return false;
-                            succeeded = edit.Replace(new SnapshotSpan(_textView.Caret.Position.BufferPosition, 0),
-                                                                      textToInsert);
-                        }
-                        // Trim traling whitespaces as we insert the new line as well if the editor option is set
-                        if (_editorOptions.GetOptionValue<bool>(DefaultOptions.TrimTrailingWhiteSpaceOptionId))
-                        {
-                            var previousNonWhitespaceCharacterIndex = lineContainingTrimTrailingWhitespacesSearchindex.IndexOfPreviousNonWhiteSpaceCharacter(searchIndexforPreviousWhitespaces);
-
-                            // Note: If previousNonWhiteSpaceCharacter index is -1 this will automatically default to line.start.position
-                            var startIndexForTrailingWhitespaceSpan = lineContainingTrimTrailingWhitespacesSearchindex.Start.Position + previousNonWhitespaceCharacterIndex + 1;
-                            var lengthOfTrailingWhitespaceSpan = searchIndexforPreviousWhitespaces - previousNonWhitespaceCharacterIndex - 1;
-
-                            if (lengthOfTrailingWhitespaceSpan != 0) // If there are any whitespaces before the caret delete them
-                                edit.Delete(new Span(startIndexForTrailingWhitespaceSpan, lengthOfTrailingWhitespaceSpan));
                         }
 
                         // Apply all changes
-                        succeeded = (edit.Apply() != snapshot);
+                        editSucceeded = editSucceeded && (edit.Apply() != snapshot);
                     }
-                }
-                finally
-                {
-                    _textView.Caret.PositionChanged -= caretWatcher;
-                }
 
-                if (succeeded)
-                {
-                    if (doIndent)
+                    // Need to move carets to indented location after the edit has completed, so we put them at the correct indentation in the new snapshot.
+                    foreach (var region in regionsToIndent)
                     {
-                        caret = _textView.Caret.Position.VirtualBufferPosition;
-                        line = caret.Position.GetContainingLine();
-
-                        //Only attempt to auto indent if -- after the edit above -- no one moved the caret on the buffer change
-                        //and the caret is at the start of its new line (no one did any funny edits to the buffer on the buffer change).
-                        if ((!caretMoved) && (caret.Position == line.Start))
+                        Selection unused;
+                        _multiSelectionBroker.TryPerformActionOnSelection(region, transformer =>
                         {
-                            caretMoved = PositionCaretWithSmartIndent(useOnlyVirtualSpace: false, extendSelection: false);
-                            if (!caretMoved && caret.IsInVirtualSpace)
+                            var caretMoved = PositionCaretWithSmartIndent(transformer, useOnlyVirtualSpace: false, extendSelection: false);
+                            if (!caretMoved && transformer.Selection.InsertionPoint.IsInVirtualSpace)
                             {
                                 //No smart indent logic so make sure the caret is not in virtual space.
-                                _textView.Caret.MoveTo(caret.Position);
+                                transformer.MoveTo(new VirtualSnapshotPoint(transformer.Selection.InsertionPoint.Position), select: false, PositionAffinity.Successor);
                             }
-                        }
+                            transformer.PerformAction(PredefinedSelectionTransformations.ClearSelection);
+                        }, out unused);
                     }
-                    ResetSelection();
                 }
-                return succeeded;
+
+                return editSucceeded;
             };
             return ExecuteAction(Strings.InsertNewLine, action, SelectionUpdate.Ignore, true);
         }
@@ -1497,8 +1434,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                     result = this.InsertNewLine();
                     if (result)
                     {
-                        // leave caret on the new line
-                        _editorPrimitives.Caret.MoveTo(0);
+                // leave caret on the new line
+                _editorPrimitives.Caret.MoveTo(0);
                     }
                 }
                 else
@@ -1542,14 +1479,14 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                         bool boxSelection = _textView.Selection.Mode == TextSelectionMode.Box &&
                                             _textView.Selection.Start != _textView.Selection.End;
 
-                        // We'll need to update the start/end points if they are in virtual space, since they won't be tracking
-                        // through a text change.
-                        VirtualSnapshotPoint? anchorPoint = (boxSelection) ? CalculateBoxIndentForSelectionPoint(_textView.Selection.AnchorPoint, indentSize) : null;
+                // We'll need to update the start/end points if they are in virtual space, since they won't be tracking
+                // through a text change.
+                VirtualSnapshotPoint? anchorPoint = (boxSelection) ? CalculateBoxIndentForSelectionPoint(_textView.Selection.AnchorPoint, indentSize) : null;
                         VirtualSnapshotPoint? activePoint = (boxSelection) ? CalculateBoxIndentForSelectionPoint(_textView.Selection.ActivePoint, indentSize) : null;
 
-                        // Insert an indent for each portion of the selection (with an empty selection, there will only be a single
-                        // span).
-                        foreach (VirtualSnapshotSpan span in _textView.Selection.VirtualSelectedSpans)
+                // Insert an indent for each portion of the selection (with an empty selection, there will only be a single
+                // span).
+                foreach (VirtualSnapshotSpan span in _textView.Selection.VirtualSelectedSpans)
                         {
                             if (!InsertIndentForSpan(span, edit, exactlyOneIndentLevel: false))
                                 return false;
@@ -1601,14 +1538,14 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
 
                 action = () => EditHelper(edit =>
                 {
-                    // We'll need to update the start/end points if they are in virtual space, since they won't be tracking
-                    // through a text change.
-                    VirtualSnapshotPoint? anchorPoint = CalculateBoxUnindentForSelectionPoint(_textView.Selection.AnchorPoint, columnsToRemove);
+            // We'll need to update the start/end points if they are in virtual space, since they won't be tracking
+            // through a text change.
+            VirtualSnapshotPoint? anchorPoint = CalculateBoxUnindentForSelectionPoint(_textView.Selection.AnchorPoint, columnsToRemove);
                     VirtualSnapshotPoint? activePoint = CalculateBoxUnindentForSelectionPoint(_textView.Selection.ActivePoint, columnsToRemove);
 
-                    // Remove an indent for each portion of the selection (with an empty selection, there will only be a single
-                    // span).
-                    foreach (VirtualSnapshotSpan span in _textView.Selection.VirtualSelectedSpans)
+            // Remove an indent for each portion of the selection (with an empty selection, there will only be a single
+            // span).
+            foreach (VirtualSnapshotSpan span in _textView.Selection.VirtualSelectedSpans)
                     {
                         if (!RemoveIndentAtPoint(span.Start.Position, edit, failOnNonWhitespaceCharacter: false, columnsToRemove: columnsToRemove))
                             return false;
@@ -1654,21 +1591,21 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                     int startLine = _editorPrimitives.Selection.GetStartPoint().LineNumber;
                     int endLine = _editorPrimitives.Selection.GetEndPoint().LineNumber;
 
-                    // If the selection is empty, we follow this algorithm:
-                    // If the current line the caret is on is blank or the caret is at the end of the line
-                    // delete all blank lines that occur later in the file.
-                    // If the caret is not on a blank line and there are no blank lines below the caret
-                    // then delete all blank lines between the caret line and the next non-blank line.
-                    // This matches VS9 behavior.
-                    if (_editorPrimitives.Selection.IsEmpty)
+            // If the selection is empty, we follow this algorithm:
+            // If the current line the caret is on is blank or the caret is at the end of the line
+            // delete all blank lines that occur later in the file.
+            // If the caret is not on a blank line and there are no blank lines below the caret
+            // then delete all blank lines between the caret line and the next non-blank line.
+            // This matches VS9 behavior.
+            if (_editorPrimitives.Selection.IsEmpty)
                     {
-                        // First search downwards to see if there are blank lines to delete if we are at the end of the
-                        // line or if we are on a blank line.
-                        TextPoint startOfLine = _editorPrimitives.Buffer.GetTextPoint(startLine, 0);
+                // First search downwards to see if there are blank lines to delete if we are at the end of the
+                // line or if we are on a blank line.
+                TextPoint startOfLine = _editorPrimitives.Buffer.GetTextPoint(startLine, 0);
 
                         if (IsPointOnBlankLine(startOfLine) ||
                             (_editorPrimitives.Caret.CurrentPosition == _editorPrimitives.Caret.EndOfLine))                  //Caret is at the physical end of a line
-                        {
+                {
                             while (endLine < _editorPrimitives.Selection.AdvancedSelection.TextView.TextSnapshot.LineCount - 1)
                             {
                                 TextPoint startOfNextLine = _editorPrimitives.Buffer.GetTextPoint(endLine + 1, 0);
@@ -1680,10 +1617,10 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                             }
                         }
 
-                        // If there are no blank lines below the current line and
-                        // this is not a blank line, look up to see if there are any
-                        // blank lines directly above the current one
-                        if (startLine == endLine)
+                // If there are no blank lines below the current line and
+                // this is not a blank line, look up to see if there are any
+                // blank lines directly above the current one
+                if (startLine == endLine)
                         {
                             if (!IsPointOnBlankLine(startOfLine))
                             {
@@ -1767,11 +1704,10 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         {
             Debug.Assert(startLine.LineNumber <= endLine.LineNumber);
 
-            var view = _textView as ITextView;
             bool isEditMade = false;
             bool success = true;
 
-            using (ITextEdit edit = view.TextBuffer.CreateEdit())
+            using (ITextEdit edit = _textView.TextBuffer.CreateEdit())
             {
                 var currentSnapshot = _textView.TextBuffer.CurrentSnapshot;
                 for (int i = startLine.LineNumber; i <= endLine.LineNumber; i++)
@@ -1793,7 +1729,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
             return success;
         }
 
-        private Span? GetTrailingWhitespaceSpanToDelete(ITextSnapshotLine line)
+        private static Span? GetTrailingWhitespaceSpanToDelete(ITextSnapshotLine line)
         {
             int indexOfLastNonWhitespaceCharacter = -1;
 
@@ -1864,7 +1800,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         public void SelectLine(ITextViewLine viewLine, bool extendSelection)
         {
             if (viewLine == null)
-                throw new ArgumentNullException("viewLine");
+                throw new ArgumentNullException(nameof(viewLine));
 
             SnapshotPoint anchor;
             SnapshotPoint active;
@@ -1947,14 +1883,6 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                     }
                 }
 
-                // If there is nothing to delete, clear the selection
-                if (spans.Count == 0)
-                {
-                    _textView.Caret.MoveTo(_textView.Selection.Start);
-                    _textView.Selection.Clear();
-                    return true;
-                }
-
                 boxDeletions = new NormalizedSnapshotSpanCollection(spans);
             }
 
@@ -1979,21 +1907,31 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 }
                 else
                 {
-                    // The selection is non-empty, so delete selected spans
-                    NormalizedSnapshotSpanCollection deletion = _textView.Selection.SelectedSpans;
+            // The selection is non-empty, so delete selected spans
+            NormalizedSnapshotSpanCollection deletion = _multiSelectionBroker.SelectedSpans;
 
-                    // Unless it is an empty box selection, so treat it as a delete on each line
-                    if (emptyBox && boxDeletions != null)
+            // Unless it is an empty box selection, so treat it as a delete on each line
+            if (emptyBox && boxDeletions != null)
                         deletion = boxDeletions;
 
                     int selectionStartVirtualSpaces = _textView.Selection.Start.VirtualSpaces;
                     bool succeeded = DeleteHelper(deletion);
 
+                    if (!_multiSelectionBroker.IsBoxSelection)
+                    {
+                // Trim remaining virtual whitespace from carets that didn't participate in actual deletions.
+                // Don't do it for box selections thought, since they get handled at the box level instead.
+                _multiSelectionBroker.PerformActionOnAllSelections(transformer =>
+                {
+                    transformer.MoveTo(transformer.Selection.Start, select: false, PositionAffinity.Successor);
+                });
+                    }
+
                     if (succeeded && (_textView.Selection.Mode != TextSelectionMode.Box))
                     {
-                        //Move the caret to the start of the selection (this doesn't happen automatically if the caret was in virtual space).
-                        //But we can't use the virtual snapshot point TranslateTo since it will remove the virtual space (because the line's line break was deleted).
-                        _textView.Caret.MoveTo(new VirtualSnapshotPoint(_textView.Selection.Start.Position, selectionStartVirtualSpaces));
+                //Move the caret to the start of the selection (this doesn't happen automatically if the caret was in virtual space).
+                //But we can't use the virtual snapshot point TranslateTo since it will remove the virtual space (because the line's line break was deleted).
+                _textView.Caret.MoveTo(new VirtualSnapshotPoint(_textView.Selection.Start.Position, selectionStartVirtualSpaces));
                         _textView.Selection.Clear();
                     }
 
@@ -2016,7 +1954,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
             // Validate
             if (text == null)
             {
-                throw new ArgumentNullException("text");
+                throw new ArgumentNullException(nameof(text));
             }
 
             Func<bool> action = () =>
@@ -2042,7 +1980,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
             // Validate
             if (span.End > _textView.TextSnapshot.Length)
             {
-                throw new ArgumentOutOfRangeException("span");
+                throw new ArgumentOutOfRangeException(nameof(span));
             }
 
             Func<bool> action = () =>
@@ -2077,7 +2015,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         {
             if (searchText == null)
             {
-                throw new ArgumentNullException("searchText");
+                throw new ArgumentNullException(nameof(searchText));
             }
 
             FindData findData = new FindData(searchText, _textView.TextSnapshot);
@@ -2341,7 +2279,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                         }
 
                         string streamText = string.Join(_editorOptions.GetNewLineCharacter() + whitespace, lines);
-                        return this.InsertText(streamText.ToString(), true, Strings.Paste, isOverwriteModeEnabled: false);
+                        return this.InsertText(streamText.ToString(CultureInfo.CurrentCulture), true, Strings.Paste, isOverwriteModeEnabled: false);
                     }
                     else
                     {
@@ -2438,7 +2376,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         {
             // Validate
             if (lineNumber < 0 || lineNumber > _textView.TextSnapshot.LineCount - 1)
-                throw new ArgumentOutOfRangeException("lineNumber");
+                throw new ArgumentOutOfRangeException(nameof(lineNumber));
 
             ITextSnapshotLine line = _textView.TextSnapshot.GetLineFromLineNumber(lineNumber);
 
@@ -2880,7 +2818,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
             // Validate
             if (text == null)
             {
-                throw new ArgumentNullException("text");
+                throw new ArgumentNullException(nameof(text));
             }
 
             if ((text.Length == 0) && !final)
@@ -2937,7 +2875,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                     }
                     else
                     {
-                        replaceSpans = _textView.Selection.VirtualSelectedSpans;
+                        replaceSpans = _multiSelectionBroker.VirtualSelectedSpans;
                     }
 
                     // The provisional composition span should be null here (the IME should
@@ -2983,18 +2921,21 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 }
                 else
                 {
-                    VirtualSnapshotPoint insertionPoint = _textView.Caret.Position.VirtualBufferPosition;
-                    if (isOverwriteModeEnabled && !insertionPoint.IsInVirtualSpace)
+                    var spans = new List<VirtualSnapshotSpan>();
+                    foreach (var caret in _multiSelectionBroker.GetSelectionsIntersectingSpan(new SnapshotSpan(_multiSelectionBroker.CurrentSnapshot, 0, _multiSelectionBroker.CurrentSnapshot.Length)))
                     {
-                        SnapshotPoint point = insertionPoint.Position;
-                        replaceSpans = new VirtualSnapshotSpan[] { new VirtualSnapshotSpan(
-                                       new SnapshotSpan(point, _textView.GetTextElementSpan(point).End)) };
+                        var insertionPoint = caret.InsertionPoint;
+                        if (isOverwriteModeEnabled && !insertionPoint.IsInVirtualSpace)
+                        {
+                            SnapshotPoint point = insertionPoint.Position;
+                            spans.Add(new VirtualSnapshotSpan(new SnapshotSpan(point, _textView.GetTextElementSpan(point).End)));
+                        }
+                        else
+                        {
+                            spans.Add(new VirtualSnapshotSpan(insertionPoint, insertionPoint));
+                        }
                     }
-                    else
-                    {
-                        replaceSpans = new VirtualSnapshotSpan[] {
-                            new VirtualSnapshotSpan(insertionPoint, insertionPoint) };
-                    }
+                    replaceSpans = spans;
                 }
 
                 ITextVersion currentVersion = _textView.TextSnapshot.Version;
@@ -3118,7 +3059,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         public bool InsertTextAsBox(string text, out VirtualSnapshotPoint boxStart, out VirtualSnapshotPoint boxEnd, string undoText)
         {
             if (text == null)
-                throw new ArgumentNullException("text");
+                throw new ArgumentNullException(nameof(text));
 
             boxStart = boxEnd = _textView.Caret.Position.VirtualBufferPosition;
 
@@ -3132,22 +3073,22 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
 
             Func<bool> action = () =>
             {
-                // Separate edit transaction for the delete
-                if (!DeleteHelper(_textView.Selection.SelectedSpans))
+        // Separate edit transaction for the delete
+        if (!DeleteHelper(_textView.Selection.SelectedSpans))
                     return false;
 
-                // Put the selection in box mode for this operation
-                _textView.Selection.Mode = TextSelectionMode.Box;
+        // Put the selection in box mode for this operation
+        _textView.Selection.Mode = TextSelectionMode.Box;
 
                 _textView.Caret.MoveTo(_textView.Selection.Start);
 
-                // Remember the starting position
-                VirtualSnapshotPoint oldCaretPos = _textView.Caret.Position.VirtualBufferPosition;
+        // Remember the starting position
+        VirtualSnapshotPoint oldCaretPos = _textView.Caret.Position.VirtualBufferPosition;
                 double startX = _textView.Caret.Left;
 
-                // Estimate the number of spaces to the caret, to be used
-                // for any amount of text that goes past the end of the buffer
-                int spacesToCaret = _editorPrimitives.View.GetTextPoint(oldCaretPos.Position).DisplayColumn + oldCaretPos.VirtualSpaces;
+        // Estimate the number of spaces to the caret, to be used
+        // for any amount of text that goes past the end of the buffer
+        int spacesToCaret = _editorPrimitives.View.GetTextPoint(oldCaretPos.Position).DisplayColumn + oldCaretPos.VirtualSpaces;
 
                 ITrackingPoint endPoint = null;
                 int? firstLineInsertedVirtualSpaces = null;
@@ -3159,49 +3100,49 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
 
                     bool pastEndOfBuffer = false;
 
-                    // Read a line at a time from the given text, inserting each line of text
-                    // into the buffer at a successive line below the line the caret is on.
-                    // For any text left over at the end of the buffer, insert endlines as
-                    // well (to create new lines at the end of the file), with virtual space
-                    // for padding.
-                    using (StringReader reader = new StringReader(text))
+            // Read a line at a time from the given text, inserting each line of text
+            // into the buffer at a successive line below the line the caret is on.
+            // For any text left over at the end of the buffer, insert endlines as
+            // well (to create new lines at the end of the file), with virtual space
+            // for padding.
+            using (StringReader reader = new StringReader(text))
                     {
                         for (string lineText = reader.ReadLine(); lineText != null;)
                         {
                             if (lineText.Length > 0)
                             {
-                                // Remember the endPoint, for determining the boxEnd argument
-                                endPoint = _textView.TextSnapshot.CreateTrackingPoint(currentCaret.Position, PointTrackingMode.Positive);
+                        // Remember the endPoint, for determining the boxEnd argument
+                        endPoint = _textView.TextSnapshot.CreateTrackingPoint(currentCaret.Position, PointTrackingMode.Positive);
 
                                 int whitespaceLength = 0;
 
-                                // Add on any virtual space needed
-                                if (currentCaret.IsInVirtualSpace)
+                        // Add on any virtual space needed
+                        if (currentCaret.IsInVirtualSpace)
                                 {
                                     string whitespace = GetWhitespaceForVirtualSpace(currentCaret);
                                     lineText = whitespace + lineText;
                                     whitespaceLength = whitespace.Length;
                                 }
 
-                                // Update information about the first inserted line
-                                if (!firstLineInsertedVirtualSpaces.HasValue)
+                        // Update information about the first inserted line
+                        if (!firstLineInsertedVirtualSpaces.HasValue)
                                 {
                                     firstLineInsertedVirtualSpaces = whitespaceLength;
                                     oldCaretPos = currentCaret;
                                 }
 
-                                // Insert the text as part of this edit transaction
-                                if (!textEdit.Insert(currentCaret.Position, lineText))
+                        // Insert the text as part of this edit transaction
+                        if (!textEdit.Insert(currentCaret.Position, lineText))
                                     return false;
                             }
 
-                            // We've already read past the end of the buffer, so we're done
-                            if (pastEndOfBuffer)
+                    // We've already read past the end of the buffer, so we're done
+                    if (pastEndOfBuffer)
                                 break;
 
-                            // If this is the last line in the file, collect the rest
-                            // of the text to insert.
-                            if (currentLine.LineBreakLength == 0)
+                    // If this is the last line in the file, collect the rest
+                    // of the text to insert.
+                    if (currentLine.LineBreakLength == 0)
                             {
                                 string whitespace = GetWhitespaceForDisplayColumn(spacesToCaret);
                                 string newline = _editorOptions.GetNewLineCharacter();
@@ -3211,16 +3152,16 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                                 string blankLines = string.Empty;
                                 while ((extraLine = reader.ReadLine()) != null)
                                 {
-                                    // Either add the line (if there is any text), or
-                                    // just add the newline
-                                    if (extraLine.Length > 0)
+                            // Either add the line (if there is any text), or
+                            // just add the newline
+                            if (extraLine.Length > 0)
                                     {
                                         lineText += blankLines + // Any blank lines
                                                     newline + // a line break, to get a new line
                                                     whitespace + // realized virtual space
                                                     extraLine; // the line text itself
 
-                                        blankLines = string.Empty;
+                                blankLines = string.Empty;
                                     }
                                     else
                                     {
@@ -3231,10 +3172,10 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                                 pastEndOfBuffer = true;
 
                                 currentCaret = new VirtualSnapshotPoint(currentLine.EndIncludingLineBreak);
-                                // Current line hasn't changed, so we don't need to set it again
-                            }
+                        // Current line hasn't changed, so we don't need to set it again
+                    }
                             else // Otherwise, try and read the next line
-                            {
+                    {
                                 lineText = reader.ReadLine();
 
                                 if (lineText != null)
@@ -3246,8 +3187,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                         }
                     }
 
-                    // If we didn't actually insert any text, then cancel the edit and return false
-                    if (endPoint == null)
+            // If we didn't actually insert any text, then cancel the edit and return false
+            if (endPoint == null)
                     {
                         textEdit.Cancel();
                         return false;
@@ -3259,23 +3200,23 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                         return false;
                 }
 
-                // Now, figure out the start and end positions
-                // and update the caret and selection.
-                _textView.Selection.Clear();
+        // Now, figure out the start and end positions
+        // and update the caret and selection.
+        _textView.Selection.Clear();
 
-                // Move the caret back to the starting point, which is now
-                // no longer in virtual space.
-                int virtualSpaces = firstLineInsertedVirtualSpaces.HasValue ? firstLineInsertedVirtualSpaces.Value : 0;
+        // Move the caret back to the starting point, which is now
+        // no longer in virtual space.
+        int virtualSpaces = firstLineInsertedVirtualSpaces.HasValue ? firstLineInsertedVirtualSpaces.Value : 0;
 
                 _textView.Caret.MoveTo(new SnapshotPoint(_textView.TextSnapshot,
                                                          oldCaretPos.Position.Position + virtualSpaces));
 
                 newStart = _textView.Caret.Position.VirtualBufferPosition;
 
-                // endPoint was a forward-tracking point at the beginning of the last insertion,
-                // so it should be positioned at the very end of the inserted text in the new
-                // snapshot.
-                newEnd = new VirtualSnapshotPoint(endPoint.GetPoint(_textView.TextSnapshot));
+        // endPoint was a forward-tracking point at the beginning of the last insertion,
+        // so it should be positioned at the very end of the inserted text in the new
+        // snapshot.
+        newEnd = new VirtualSnapshotPoint(endPoint.GetPoint(_textView.TextSnapshot));
 
                 return true;
             };
@@ -3376,7 +3317,6 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 // which causes the OS to send out two almost simultaneous clipboard open/close notification pairs 
                 // which confuse applications that try to synchronize clipboard data between multiple machines such 
                 // as MagicMouse or remote desktop.
-
                 Clipboard.SetDataObject(dataObject, false);
 #endif
 
@@ -3626,10 +3566,10 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 {
                     ITextSnapshotLine line = snapshot.GetLineFromLineNumber(i);
 
-                    // If the line is blank or the (non-empty) selection ends at the start of this line, exclude
-                    // the line from processing.
-                    if (line.Length == 0 ||
-                        (!_textView.Selection.IsEmpty && line.Start == _textView.Selection.End.Position))
+            // If the line is blank or the (non-empty) selection ends at the start of this line, exclude
+            // the line from processing.
+            if (line.Length == 0 ||
+                (!_textView.Selection.IsEmpty && line.Start == _textView.Selection.End.Position))
                         continue;
 
                     TextPoint textPoint = _editorPrimitives.Buffer.GetTextPoint(line.Start).GetFirstNonWhiteSpaceCharacterOnLine();
@@ -4006,7 +3946,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 {
                     textPoint.MoveTo(i);
                     string character = textPoint.GetNextCharacter();
-                    if (character != " " && character != "\t")
+                    if (!string.Equals(character, " ", StringComparison.Ordinal) && !string.Equals(character, "\t", StringComparison.Ordinal))
                         break;
 
                     column = textPoint.Column;
@@ -4209,7 +4149,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 }
 
                 Span replaceSpan = Span.FromBounds(whiteSpaceStart, whiteSpaceEnd);
-                if ((replaceSpan.Length != textToInsert.Length) || (textToInsert != textEdit.Snapshot.GetText(replaceSpan))) //performance hack: don't get the text if we know they'll be different.
+                if ((replaceSpan.Length != textToInsert.Length) || (!string.Equals(textToInsert, textEdit.Snapshot.GetText(replaceSpan), StringComparison.Ordinal))) //performance hack: don't get the text if we know they'll be different.
                     return textEdit.Replace(replaceSpan, textToInsert);
             }
 
@@ -4313,9 +4253,9 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// <param name="extendSelection">If <c>true</c>, extend the current selection, from the existing anchor point,
         /// to the new caret position.</param>
         /// <returns><c>true</c> if the caret was positioned in virtual space.</returns>
-        private bool PositionCaretWithSmartIndent(bool useOnlyVirtualSpace = true, bool extendSelection = false)
+        private bool PositionCaretWithSmartIndent(ISelectionTransformer transformer, bool useOnlyVirtualSpace = true, bool extendSelection = false)
         {
-            var caretPosition = _textView.Caret.Position.VirtualBufferPosition;
+            var caretPosition = transformer.Selection.InsertionPoint;
             var caretLine = caretPosition.Position.GetContainingLine();
 
             int? indentation = _factory.SmartIndentationService.GetDesiredIndentation(_textView, caretLine);
@@ -4325,8 +4265,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                 {
                     //Position the caret in virtual space at the appropriate indentation.
                     var newCaretPoint = new VirtualSnapshotPoint(caretPosition.Position, Math.Max(0, indentation.Value - caretLine.Length));
-                    var anchorPoint = (extendSelection) ? _textView.Selection.AnchorPoint : newCaretPoint;
-                    SelectAndMoveCaret(anchorPoint, newCaretPoint, selectionMode: TextSelectionMode.Stream, scrollOptions: null);
+                    var anchorPoint = (extendSelection) ? transformer.Selection.AnchorPoint : newCaretPoint;
+                    transformer.MoveTo(anchorPoint, newCaretPoint, newCaretPoint, PositionAffinity.Successor);
                     return true;
                 }
                 else if (!useOnlyVirtualSpace)
@@ -4350,7 +4290,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         /// <param name="line">Which line to evaluate</param>
         /// <param name="startPosition">Position where the count starts</param>
         /// <returns>Number of leading whitespace characters located after startPosition</returns>
-        private int GetLeadingWhitespaceChars(ITextSnapshotLine line, SnapshotPoint startPosition)
+        private static int GetLeadingWhitespaceChars(ITextSnapshotLine line, SnapshotPoint startPosition)
         {
             int whitespace = 0;
             for (int i = startPosition.Position; i < line.End; ++i)
@@ -4385,7 +4325,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
 
                         SnapshotSpan currentWhiteSpace = new SnapshotSpan(line.Start, firstNonWhitespaceCharacter.AdvancedTextPoint);
 
-                        if (whitespace != currentWhiteSpace.GetText())
+                        if (!string.Equals(whitespace, currentWhiteSpace.GetText(), StringComparison.Ordinal))
                         {
                             if (!textEdit.Replace(currentWhiteSpace, whitespace))
                                 return false;
@@ -4567,7 +4507,7 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                     if (line.LineBreakLength != 0)
                     {
                         string breakText = line.GetLineBreakText();
-                        if (breakText != replacement)
+                        if (!string.Equals(breakText, replacement, StringComparison.Ordinal))
                         {
                             if (!edit.Replace(line.End, line.LineBreakLength, replacement))
                                 return false;
@@ -4613,10 +4553,10 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                     {
                         var virtualSelectedSpans = _textView.Selection.VirtualSelectedSpans;
 
-                        // This is used only in the case of zero width block selection in order to maintain the block selection after
-                        // our edit. On the first span we want to insert the copied text after the current row so that the top of the block
-                        // selection doesn't move. An all others, we want to insert above so the bottom of the block selection does move.
-                        bool insertBelow = virtualSelectedSpans.Count > 1;
+                // This is used only in the case of zero width block selection in order to maintain the block selection after
+                // our edit. On the first span we want to insert the copied text after the current row so that the top of the block
+                // selection doesn't move. An all others, we want to insert above so the bottom of the block selection does move.
+                bool insertBelow = virtualSelectedSpans.Count > 1;
                         foreach (var virtualSpan in virtualSelectedSpans)
                         {
                             if (virtualSpan.Length > 0)
@@ -4627,12 +4567,12 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                                 }
                                 else
                                 {
-                                    // Is this all in virtual space, if so, do nothing
-                                    if (!virtualSpan.Start.IsInVirtualSpace)
+                            // Is this all in virtual space, if so, do nothing
+                            if (!virtualSpan.Start.IsInVirtualSpace)
                                     {
-                                        // Ok, we need to pad with whitespace as well as duplicate. Append the amount of virtual space as spaces after the inserted text
-                                        // since we're inserting before the caret.
-                                        edit.Insert(virtualSpan.Start.Position, virtualSpan.GetText());
+                                // Ok, we need to pad with whitespace as well as duplicate. Append the amount of virtual space as spaces after the inserted text
+                                // since we're inserting before the caret.
+                                edit.Insert(virtualSpan.Start.Position, virtualSpan.GetText());
 
                                         int whiteSpaceSize = virtualSpan.Length - virtualSpan.SnapshotSpan.Length;
                                         string insertedSpace = GetWhiteSpaceForPositionAndVirtualSpace(virtualSpan.SnapshotSpan.End, whiteSpaceSize, useBufferPrimitives: true);
@@ -4642,8 +4582,8 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
                             }
                             else
                             {
-                                // This must be a zero-width block selection, treat like several instances of no-selection and just duplicate the lines.
-                                DuplicateLine(virtualSpan.Start.Position, edit, insertBelow);
+                        // This must be a zero-width block selection, treat like several instances of no-selection and just duplicate the lines.
+                        DuplicateLine(virtualSpan.Start.Position, edit, insertBelow);
                                 insertBelow = false;
                             }
                         }

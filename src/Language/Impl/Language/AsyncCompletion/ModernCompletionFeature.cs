@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
 using Microsoft.VisualStudio.Text.Utilities;
-using Microsoft.VisualStudio.Utilities.Features;
+using Microsoft.VisualStudio.Utilities;
 
 namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implementation
 {
@@ -25,11 +25,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             if (_treatmentFlightDataInitialized)
                 return _treatmentFlightEnabled;
 
-#if DEBUG
-            _treatmentFlightEnabled = true;
-#else
             _treatmentFlightEnabled = experimentationService.IsCachedFlightEnabled(TreatmentFlightName);
-#endif
             _treatmentFlightDataInitialized = true;
             return _treatmentFlightEnabled;
         }

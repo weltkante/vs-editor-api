@@ -25,18 +25,13 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
         private JoinableTask<TModel> _lastJoinableTask;
         private CancellationTokenSource _uiCancellation;
 
-        internal TModel RecentModel { get; private set; } = default(TModel);
+        internal TModel RecentModel { get; private set; } = default;
 
         /// <summary>
         /// Creates an instance of <see cref="ModelComputation{TModel}"/>
         /// and enqueues an task that will generate the initial state of the <typeparamref name="TModel"/>
         /// </summary>
-        /// <param name="computationTaskScheduler"></param>
-        /// <param name="joinableTaskContext"></param>
-        /// <param name="initialTransformation"></param>
-        /// <param name="token"></param>
-        /// <param name="guardedOperations"></param>
-        /// <param name="callbacks"></param>
+#pragma warning disable CA1068 // CancellationToken should be the last parameter
         public ModelComputation(
             TaskScheduler computationTaskScheduler,
             JoinableTaskContext joinableTaskContext,
@@ -44,6 +39,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
             CancellationToken token,
             IGuardedOperations guardedOperations,
             IModelComputationCallbackHandler<TModel> callbacks)
+#pragma warning restore CA1068
         {
             _joinableTaskFactory = joinableTaskContext.Factory;
             _computationTaskScheduler = computationTaskScheduler;
@@ -91,7 +87,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                     if (_token.IsCancellationRequested || _terminated)
                         return previousModel;
 
-                    var transformedModel = await transformation(await previousTask, _token);
+                    var transformedModel = await transformation(await previousTask, _token).ConfigureAwait(true);
                     RecentModel = transformedModel;
 
                     // TODO: update UI even if updateUi is false but it wasn't updated yet.
@@ -99,7 +95,7 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
                     {
                         // update UI because we're the latest task
                         if (!_uiCancellation.IsCancellationRequested)
-                            _callbacks.UpdateUi(transformedModel, _uiCancellation.Token).Forget();
+                            _callbacks.UpdateUI(transformedModel, _uiCancellation.Token).Forget();
                     }
 
                     return transformedModel;
@@ -118,11 +114,15 @@ namespace Microsoft.VisualStudio.Language.Intellisense.AsyncCompletion.Implement
 
         /// <summary>
         /// Blocks, waiting for all background work to finish.
-        /// Prevents the UI from displaying.
         /// </summary>
-        public TModel WaitAndGetResult(CancellationToken token)
+        /// <param name="cancelUi">Whether UI should be dismissed. If false, this method will return after UI has been rendered</param>
+        /// <param name="token">Token used to cancel the operation, unblock the thread and return null</param>
+        /// <returns></returns>
+        public TModel WaitAndGetResult(bool cancelUi, CancellationToken token)
         {
-            _uiCancellation.Cancel();
+            if (cancelUi)
+                _uiCancellation.Cancel();
+
             try
             {
                 return _lastJoinableTask.Join(token);

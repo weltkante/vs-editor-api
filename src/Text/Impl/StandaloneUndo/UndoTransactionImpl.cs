@@ -31,12 +31,12 @@ namespace Microsoft.VisualStudio.Text.Operations.Standalone
         {
             if (history == null)
             {
-                throw new ArgumentNullException("history", String.Format(CultureInfo.CurrentUICulture, "Strings.ArgumentCannotBeNull", "UndoTransactionImpl", "history"));
+                throw new ArgumentNullException(nameof(history));
             }
 
-            if (String.IsNullOrEmpty(description))
+            if (string.IsNullOrEmpty(description))
             {
-                throw new ArgumentNullException("description", String.Format(CultureInfo.CurrentUICulture, "Strings.ArgumentCannotBeNull", "UndoTransactionImpl", "description"));
+                throw new ArgumentNullException(nameof(description));
             }
 
             this.history = history as UndoHistoryImpl;
@@ -363,17 +363,19 @@ namespace Microsoft.VisualStudio.Text.Operations.Standalone
             {
                 if (value == null)
                 {
-                    throw new ArgumentNullException("value");
+                    throw new ArgumentNullException(nameof(value));
                 }
 
                 this.mergePolicy = value; 
             }
         }
 
-        /// <summary>
-        /// Closes a transaction and disposes it.
-        /// </summary>
+#pragma warning disable CA1063 // Implement IDisposable Correctly
+                              /// <summary>
+                              /// Closes a transaction and disposes it.
+                              /// </summary>
         public void Dispose()
+#pragma warning restore CA1063 // Implement IDisposable Correctly
         {
             GC.SuppressFinalize(this);
             switch (this.State)

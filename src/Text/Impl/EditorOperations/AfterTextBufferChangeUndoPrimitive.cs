@@ -39,11 +39,11 @@ namespace Microsoft.VisualStudio.Text.Operations.Implementation
         {
             if (textView == null)
             {
-                throw new ArgumentNullException("textView");
+                throw new ArgumentNullException(nameof(textView));
             }
             if (undoHistory == null)
             {
-                throw new ArgumentNullException("undoHistory");
+                throw new ArgumentNullException(nameof(undoHistory));
             }
 
             // Store the ITextView for these changes in the ITextUndoHistory properties so we can retrieve it later.

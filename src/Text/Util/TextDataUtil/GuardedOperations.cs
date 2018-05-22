@@ -38,6 +38,9 @@ namespace Microsoft.VisualStudio.Text.Utilities
         private FrugalList<IExtensionErrorHandler> _errorHandlers;
         private FrugalList<IExtensionPerformanceTracker> _perfTrackers;
 
+        private static Exception LastHandledException = null;
+        private static string LastHandleExceptionStackTrace = null;
+
         public GuardedOperations()
         {
         }
@@ -82,7 +85,7 @@ namespace Microsoft.VisualStudio.Text.Utilities
                             }
                             catch (Exception)
                             {
-                                Debug.Fail("Exception instantiating error handler!");
+                                GuardedOperations.Fail("Exception instantiating error handler!");
                             }
                         }
                     }
@@ -112,7 +115,7 @@ namespace Microsoft.VisualStudio.Text.Utilities
                             }
                             catch (Exception)
                             {
-                                Debug.Fail("Exception instantiating perf tracker");
+                                GuardedOperations.Fail("Exception instantiating perf tracker");
                             }
                         }
                     }
@@ -150,8 +153,9 @@ namespace Microsoft.VisualStudio.Text.Utilities
             where TMetadataView : IContentTypeMetadata
         {
             var candidates = new List<Lazy<TExtension, TMetadataView>>();
-            foreach (var providerHandle in providerHandles)
+            for (int i = 0; (i < providerHandles.Count); ++i)
             {
+                var providerHandle = providerHandles[i];
                 foreach (string contentTypeName in providerHandle.Metadata.ContentTypes)
                 {
                     if (string.Compare(dataContentType.TypeName, contentTypeName, StringComparison.OrdinalIgnoreCase) == 0)
@@ -418,7 +422,7 @@ namespace Microsoft.VisualStudio.Text.Utilities
         {
             try
             {
-                await asyncAction();
+                await asyncAction().ConfigureAwait(true);
             }
             catch (OperationCanceledException) { } // swallow OperationCanceledException in async method calls
             catch (Exception e)
@@ -427,16 +431,13 @@ namespace Microsoft.VisualStudio.Text.Utilities
             }
         }
 
-        public async Task CallExtensionPointAsync(Func<Task> asyncAction)
-        {
-            await CallExtensionPointAsync(errorSource: null, asyncAction: asyncAction);
-        }
+        public Task CallExtensionPointAsync(Func<Task> asyncAction) => CallExtensionPointAsync(errorSource: null, asyncAction: asyncAction);
 
         public async Task<T> CallExtensionPointAsync<T>(object errorSource, Func<Task<T>> asyncCall, T valueOnThrow)
         {
             try
             {
-                return await asyncCall();
+                return await asyncCall().ConfigureAwait(true);
             }
             catch (OperationCanceledException)
             {
@@ -450,10 +451,8 @@ namespace Microsoft.VisualStudio.Text.Utilities
             }
         }
 
-        public async Task<T> CallExtensionPointAsync<T>(Func<Task<T>> asyncCall, T valueOnThrow)
-        {
-            return await CallExtensionPointAsync<T>(errorSource: null, asyncCall: asyncCall, valueOnThrow: valueOnThrow);
-        }
+        public Task<T> CallExtensionPointAsync<T>(Func<Task<T>> asyncCall, T valueOnThrow)
+            => CallExtensionPointAsync<T>(errorSource: null, asyncCall: asyncCall, valueOnThrow: valueOnThrow);
 
         public void RaiseEvent(object sender, EventHandler eventHandlers)
         {
@@ -464,8 +463,9 @@ namespace Microsoft.VisualStudio.Text.Utilities
 
             var handlers = eventHandlers.GetInvocationList();
 
-            foreach (EventHandler handler in handlers)
+            for (int i = 0; (i < handlers.Length); ++i)
             {
+                var handler = (EventHandler)(handlers[i]);
                 try
                 {
                     BeforeCallingEventHandler(handler);
@@ -490,8 +490,9 @@ namespace Microsoft.VisualStudio.Text.Utilities
             }
             var handlers = eventHandlers.GetInvocationList();
 
-            foreach (EventHandler<TArgs> handler in handlers)
+            for (int i = 0; (i < handlers.Length); ++i)
             {
+                var handler = (EventHandler<TArgs>)(handlers[i]);
                 try
                 {
                     BeforeCallingEventHandler(handler);
@@ -517,6 +518,7 @@ namespace Microsoft.VisualStudio.Text.Utilities
 
             for (int i = 0; i < PerfTrackers.Count; i++)
             {
+                var perfTracker = PerfTrackers[i];
                 try
                 {
                     PerfTrackers[i].AfterCallingEventHandler(handler);
@@ -537,6 +539,7 @@ namespace Microsoft.VisualStudio.Text.Utilities
 
             for (int i = 0; i < PerfTrackers.Count; i++)
             {
+                var perfTracker = PerfTrackers[i];
                 try
                 {
                     PerfTrackers[i].AfterCallingExtension(extensionPoint);
@@ -557,6 +560,7 @@ namespace Microsoft.VisualStudio.Text.Utilities
 
             for (int i = 0; i < PerfTrackers.Count; i++)
             {
+                var perfTracker = PerfTrackers[i];
                 try
                 {
                     PerfTrackers[i].BeforeCallingEventHandler(handler);
@@ -577,6 +581,7 @@ namespace Microsoft.VisualStudio.Text.Utilities
 
             for (int i = 0; i < PerfTrackers.Count; i++)
             {
+                var perfTracker = PerfTrackers[i];
                 try
                 {
                     PerfTrackers[i].BeforeCallingExtension(extensionPoint);
@@ -591,23 +596,27 @@ namespace Microsoft.VisualStudio.Text.Utilities
         public void HandleException(object errorSource, Exception e)
         {
             bool handled = false;
-            foreach (var errorHandler in ErrorHandlers)
+            for (int i = 0; (i < ErrorHandlers.Count); ++i)
             {
+                var errorHandler = ErrorHandlers[i];
                 try
                 {
+                    GuardedOperations.LastHandledException = e;
+                    GuardedOperations.LastHandleExceptionStackTrace = e.StackTrace;
+
                     errorHandler.HandleError(errorSource, e);
                     handled = true;
                 }
                 catch (Exception doubleFaultException)
                 {
                     // TODO: What is the right behavior here?
-                    Debug.Fail(doubleFaultException.ToString());
+                    GuardedOperations.Fail(doubleFaultException.ToString());
                 }
             }
             if (!handled)
             {
                 // TODO: What is the right behavior here?
-                Debug.Fail(e.ToString());
+                GuardedOperations.Fail(e.ToString());
 
                 if (GuardedOperations.ReThrowIfNoHandlers)
                     throw new Exception("Unhandled exception.", e);
@@ -701,12 +710,13 @@ namespace Microsoft.VisualStudio.Text.Utilities
 
                 var handlers = eventHandlers.GetInvocationList();
 
-                foreach (AsyncEventHandler<TArgs> handler in handlers)
+                for (int i = 0; (i < handlers.Length); ++i)
                 {
+                    var handler = (AsyncEventHandler<TArgs>)(handlers[i]);
                     try
                     {
                         BeforeCallingEventHandler(handler);
-                        await handler(sender, args);
+                        await handler(sender, args).ConfigureAwait(true);
                     }
                     catch (Exception e)
                     {
@@ -718,6 +728,19 @@ namespace Microsoft.VisualStudio.Text.Utilities
                     }
                 }
             }).Task;
+        }
+
+        static bool _ignoreFailures = false;
+
+        [Conditional("DEBUG")]
+        private static void Fail(string message)
+        {
+            if (!_ignoreFailures)
+            {
+                if (Debugger.IsAttached)
+                    Debugger.Break();
+                Debug.Fail(message);
+            }
         }
     }
 }
