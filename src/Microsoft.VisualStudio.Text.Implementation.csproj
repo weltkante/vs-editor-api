@@ -132,12 +132,15 @@
   <ItemGroup>
     <PackageReference Include="System.Collections.Immutable" Version="$(SystemCollectionsImmutableVersion)" />
     <PackageReference Include="System.ValueTuple" Version="4.3.0" />
-    <PackageReference Include="Microsoft.VisualStudio.CoreUtility" Version="$(NuGetVersionEditor)" />
     <PackageReference Include="Microsoft.VisualStudio.Language" Version="$(NuGetVersionLanguage)" />
     <PackageReference Include="Microsoft.VisualStudio.Language.StandardClassification" Version="$(NuGetVersionEditor)" />
-    <PackageReference Include="Microsoft.VisualStudio.Text.Data" Version="$(NuGetVersionEditor)" />
-    <PackageReference Include="Microsoft.VisualStudio.Text.Logic" Version="$(NuGetVersionEditor)" />
-    <PackageReference Include="Microsoft.VisualStudio.Text.UI" Version="$(NuGetVersionEditor)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="Core\Def\CoreUtility.csproj" />
+    <ProjectReference Include="Text\Def\TextData\TextData.csproj" />
+    <ProjectReference Include="Text\Def\TextLogic\TextLogic.csproj" />
+    <ProjectReference Include="Text\Def\TextUI\TextUI.csproj" />
   </ItemGroup>
 
 </Project>
