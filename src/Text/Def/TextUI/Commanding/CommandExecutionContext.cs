@@ -22,6 +22,8 @@ namespace Microsoft.VisualStudio.Commanding
         /// enables two way shared cancellability and wait indication.
         /// </summary>
         public IUIThreadOperationContext WaitContext { get; }
+
+        public IUIThreadOperationContext OperationContext => WaitContext;
     }
 }
 
